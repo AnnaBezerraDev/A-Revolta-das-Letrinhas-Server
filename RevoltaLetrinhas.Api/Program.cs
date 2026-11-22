@@ -36,6 +36,13 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
+    // Garante que novas colunas adicionadas existem em bancos SQLite existentes sem quebrar o servidor
+    try { db.Database.ExecuteSqlRaw("ALTER TABLE Municipios ADD COLUMN DataExpiracaoContrato TEXT NULL;"); } catch { }
+    try { db.Database.ExecuteSqlRaw("ALTER TABLE Municipios ADD COLUMN NumeroConvenio TEXT NULL;"); } catch { }
+    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN LoginProfessor TEXT NULL;"); } catch { }
+    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN SenhaProfessor TEXT NULL;"); } catch { }
+    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN NomeProfessor TEXT NULL;"); } catch { }
+
     if (!db.Escolas.Any())
     {
         var mun1 = new Municipio { Nome = "Campinas", UF = "SP" };
@@ -65,6 +72,60 @@ using (var scope = app.Services.CreateScope())
             new ProgressoFase { Aluno = a2, Materia = "Portugues", Nivel = "Facil", NumeroFase = 1, Concluida = true, Estrelas = 3, Pontuacao = 1600, TempoGastoSegundos = 38 }
         );
 
+        db.SaveChanges();
+    }
+
+    // Garante que a escola Teste (ESC-TESTE) existe com a turma 3A e professora Anna
+    if (!db.Escolas.Any(e => e.TokenAcesso == "ESC-TESTE"))
+    {
+        var mun = db.Municipios.FirstOrDefault(m => m.Nome == "Ribeirão Preto") ?? new Municipio { Nome = "Ribeirão Preto", UF = "SP" };
+        if (mun.Id == Guid.Empty) db.Municipios.Add(mun);
+
+        var escTeste = new Escola
+        {
+            Municipio = mun,
+            Nome = "Teste",
+            TokenAcesso = "ESC-TESTE",
+            Ativa = true
+        };
+        db.Escolas.Add(escTeste);
+
+        var tur3A = new Turma
+        {
+            Escola = escTeste,
+            Nome = "3A",
+            NomeProfessor = "Anna",
+            LoginProfessor = "profanna",
+            SenhaProfessor = "1234"
+        };
+        db.Turmas.Add(tur3A);
+        db.SaveChanges();
+    }
+
+    // Garante que a escola Olinto (ESC-OLINTO) também existe com turma 3ºANO A
+    if (!db.Escolas.Any(e => e.TokenAcesso == "ESC-OLINTO"))
+    {
+        var munJaborandi = db.Municipios.FirstOrDefault(m => m.Nome == "Jaborandi") ?? new Municipio { Nome = "Jaborandi", UF = "SP" };
+        if (munJaborandi.Id == Guid.Empty) db.Municipios.Add(munJaborandi);
+
+        var escOlinto = new Escola
+        {
+            Municipio = munJaborandi,
+            Nome = "Olinto",
+            TokenAcesso = "ESC-OLINTO",
+            Ativa = true
+        };
+        db.Escolas.Add(escOlinto);
+
+        var turOlinto = new Turma
+        {
+            Escola = escOlinto,
+            Nome = "3ºANO A",
+            NomeProfessor = "Professora Anna",
+            LoginProfessor = "prof.anna",
+            SenhaProfessor = "1234"
+        };
+        db.Turmas.Add(turOlinto);
         db.SaveChanges();
     }
 }

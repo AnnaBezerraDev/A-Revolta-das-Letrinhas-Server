@@ -20,6 +20,61 @@ public class JogoController : ControllerBase
     }
 
     /// <summary>
+    /// Consulta a versão mais recente do jogo e se há atualizações para as escolas.
+    /// </summary>
+    [HttpGet("versao")]
+    public IActionResult ObterVersaoJogo()
+    {
+        var patchPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "patch", "Assembly-CSharp.dll");
+        bool temPatch = System.IO.File.Exists(patchPath);
+        long tamanho = temPatch ? new FileInfo(patchPath).Length : 0;
+        DateTime ultimaModificacao = temPatch ? System.IO.File.GetLastWriteTimeUtc(patchPath) : DateTime.UtcNow;
+
+        return Ok(new
+        {
+            versao = "1.0.1",
+            versaoCodigo = 101,
+            dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            temPatch = temPatch,
+            tamanhoBytes = tamanho,
+            urlDownloadPatch = "/api/jogo/download-patch",
+            novidades = "Atualizações pedagógicas da BNCC, acesso individual para professores e fechamento seguro."
+        });
+    }
+
+    /// <summary>
+    /// Baixa a DLL atualizada do jogo para aplicação direta sem precisar baixar o jogo inteiro de novo.
+    /// </summary>
+    [HttpGet("download-patch")]
+    public IActionResult DownloadPatch()
+    {
+        var patchPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "patch", "Assembly-CSharp.dll");
+        if (!System.IO.File.Exists(patchPath))
+        {
+            return NotFound("Nenhum arquivo de atualização disponível no momento.");
+        }
+        return PhysicalFile(patchPath, "application/octet-stream", "Assembly-CSharp.dll");
+    }
+
+    /// <summary>
+    /// Permite que a desenvolvedora envie um novo patch Assembly-CSharp.dll para distribuir a todas as escolas.
+    /// </summary>
+    [HttpPost("upload-patch")]
+    public async Task<IActionResult> UploadPatch(IFormFile arquivoPatch)
+    {
+        if (arquivoPatch == null || arquivoPatch.Length == 0) return BadRequest("Arquivo do patch não enviado.");
+        var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "patch");
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+        var dest = Path.Combine(dir, "Assembly-CSharp.dll");
+        using (var stream = new FileStream(dest, FileMode.Create))
+        {
+            await arquivoPatch.CopyToAsync(stream);
+        }
+        _logger.LogInformation("Novo patch publicado com sucesso! Tamanho: {Bytes} bytes", arquivoPatch.Length);
+        return Ok(new { mensagem = "Patch publicado com sucesso! Todas as escolas atualizarão automaticamente ao abrir o jogo." });
+    }
+
+    /// <summary>
     /// Retorna todas as escolas cadastradas para que o professor possa selecionar no jogo se necessário.
     /// </summary>
     [HttpGet("escolas-disponiveis")]
@@ -114,21 +169,18 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromBody] LoginProfessorDto dto)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token da escola não informado.");
+        if (dto == null || string.IsNullOrWhiteSpace(dto.Login) || string.IsNullOrWhiteSpace(dto.Senha))
+        {
+            return BadRequest(new { sucesso = false, erro = "Login e senha obrigatórios." });
+        }
 
-        var escola = await _db.Escolas
-            .Include(e => e.Turmas)
-                .ThenInclude(t => t.Alunos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
-
-        if (escola == null) return NotFound("Escola não encontrada.");
-
-        string user = dto.Login.Trim().ToLower();
+        string rawUser = dto.Login.Trim();
+        string user = rawUser.ToLower();
+        string userNorm = user.Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", "");
         string pass = dto.Senha.Trim();
 
         // 1. Verifica se é o admin padrão da escola
-        if (user == "professor" && pass == "1234")
+        if ((user == "professor" || userNorm == "professor") && pass == "1234")
         {
             return Ok(new
             {
@@ -140,20 +192,62 @@ public class JogoController : ControllerBase
             });
         }
 
-        // 2. Verifica se é um professor exclusivo cadastrado em alguma sala
-        var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
-            string.Equals(t.LoginProfessor, user, StringComparison.OrdinalIgnoreCase) &&
-            t.SenhaProfessor == pass);
+        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader.Trim() : token?.Trim();
+        Escola? escola = null;
+        if (!string.IsNullOrWhiteSpace(tokenEfetivo))
+        {
+            escola = await _db.Escolas
+                .Include(e => e.Turmas)
+                    .ThenInclude(t => t.Alunos)
+                .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+        }
 
-        if (turmaDoProf != null)
+        // 2. Verifica se é um professor exclusivo cadastrado na escola informada
+        if (escola != null && escola.Turmas != null)
+        {
+            var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
+                !string.IsNullOrWhiteSpace(t.LoginProfessor) &&
+                (string.Equals(t.LoginProfessor.Trim(), user, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(t.LoginProfessor.Trim().ToLower().Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", ""), userNorm, StringComparison.OrdinalIgnoreCase)) &&
+                string.Equals(t.SenhaProfessor?.Trim(), pass));
+
+            if (turmaDoProf != null)
+            {
+                return Ok(new
+                {
+                    sucesso = true,
+                    tipo = "ProfessorSala",
+                    nome = turmaDoProf.NomeProfessor ?? "Professor da Sala",
+                    turmaId = (Guid?)turmaDoProf.Id,
+                    turmaNome = turmaDoProf.Nome,
+                    escolaNome = escola.Nome,
+                    tokenEscola = escola.TokenAcesso
+                });
+            }
+        }
+
+        // 3. Fallback inteligente: Procura em QUALQUER escola ativa do servidor se o professor existir
+        var todasTurmas = await _db.Turmas
+            .Include(t => t.Escola)
+            .Where(t => t.Escola != null && t.Escola.Ativa && !string.IsNullOrWhiteSpace(t.LoginProfessor))
+            .ToListAsync();
+
+        var turmaGlobal = todasTurmas.FirstOrDefault(t =>
+            (string.Equals(t.LoginProfessor!.Trim(), user, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(t.LoginProfessor.Trim().ToLower().Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", ""), userNorm, StringComparison.OrdinalIgnoreCase)) &&
+            string.Equals(t.SenhaProfessor?.Trim(), pass));
+
+        if (turmaGlobal != null)
         {
             return Ok(new
             {
                 sucesso = true,
                 tipo = "ProfessorSala",
-                nome = turmaDoProf.NomeProfessor ?? "Professor da Sala",
-                turmaId = (Guid?)turmaDoProf.Id,
-                turmaNome = turmaDoProf.Nome
+                nome = turmaGlobal.NomeProfessor ?? "Professor da Sala",
+                turmaId = (Guid?)turmaGlobal.Id,
+                turmaNome = turmaGlobal.Nome,
+                escolaNome = turmaGlobal.Escola?.Nome,
+                tokenEscola = turmaGlobal.Escola?.TokenAcesso
             });
         }
 
