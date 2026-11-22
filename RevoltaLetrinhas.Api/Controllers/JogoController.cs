@@ -32,13 +32,13 @@ public class JogoController : ControllerBase
 
         return Ok(new
         {
-            versao = "1.0.1",
-            versaoCodigo = 101,
+            versao = "1.0.2",
+            versaoCodigo = 102,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Atualizações pedagógicas da BNCC, acesso individual para professores e fechamento seguro."
+            novidades = "Botão e modal de vinculação por Token da Escola, login individual de professores sem falhas, fechamento imediato do jogo e limpeza visual de textos."
         });
     }
 
@@ -169,18 +169,21 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromBody] LoginProfessorDto dto)
     {
-        if (dto == null || string.IsNullOrWhiteSpace(dto.Login) || string.IsNullOrWhiteSpace(dto.Senha))
-        {
-            return BadRequest(new { sucesso = false, erro = "Login e senha obrigatórios." });
-        }
+        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
+        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token da escola não informado.");
 
-        string rawUser = dto.Login.Trim();
-        string user = rawUser.ToLower();
-        string userNorm = user.Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", "");
+        var escola = await _db.Escolas
+            .Include(e => e.Turmas)
+                .ThenInclude(t => t.Alunos)
+            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+
+        if (escola == null) return NotFound("Escola não encontrada.");
+
+        string user = dto.Login.Trim().ToLower();
         string pass = dto.Senha.Trim();
 
         // 1. Verifica se é o admin padrão da escola
-        if ((user == "professor" || userNorm == "professor") && pass == "1234")
+        if (user == "professor" && pass == "1234")
         {
             return Ok(new
             {
@@ -192,62 +195,20 @@ public class JogoController : ControllerBase
             });
         }
 
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader.Trim() : token?.Trim();
-        Escola? escola = null;
-        if (!string.IsNullOrWhiteSpace(tokenEfetivo))
-        {
-            escola = await _db.Escolas
-                .Include(e => e.Turmas)
-                    .ThenInclude(t => t.Alunos)
-                .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
-        }
+        // 2. Verifica se é um professor exclusivo cadastrado em alguma sala
+        var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
+            string.Equals(t.LoginProfessor, user, StringComparison.OrdinalIgnoreCase) &&
+            t.SenhaProfessor == pass);
 
-        // 2. Verifica se é um professor exclusivo cadastrado na escola informada
-        if (escola != null && escola.Turmas != null)
-        {
-            var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
-                !string.IsNullOrWhiteSpace(t.LoginProfessor) &&
-                (string.Equals(t.LoginProfessor.Trim(), user, StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(t.LoginProfessor.Trim().ToLower().Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", ""), userNorm, StringComparison.OrdinalIgnoreCase)) &&
-                string.Equals(t.SenhaProfessor?.Trim(), pass));
-
-            if (turmaDoProf != null)
-            {
-                return Ok(new
-                {
-                    sucesso = true,
-                    tipo = "ProfessorSala",
-                    nome = turmaDoProf.NomeProfessor ?? "Professor da Sala",
-                    turmaId = (Guid?)turmaDoProf.Id,
-                    turmaNome = turmaDoProf.Nome,
-                    escolaNome = escola.Nome,
-                    tokenEscola = escola.TokenAcesso
-                });
-            }
-        }
-
-        // 3. Fallback inteligente: Procura em QUALQUER escola ativa do servidor se o professor existir
-        var todasTurmas = await _db.Turmas
-            .Include(t => t.Escola)
-            .Where(t => t.Escola != null && t.Escola.Ativa && !string.IsNullOrWhiteSpace(t.LoginProfessor))
-            .ToListAsync();
-
-        var turmaGlobal = todasTurmas.FirstOrDefault(t =>
-            (string.Equals(t.LoginProfessor!.Trim(), user, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(t.LoginProfessor.Trim().ToLower().Replace(".", "").Replace("_", "").Replace("-", "").Replace(" ", ""), userNorm, StringComparison.OrdinalIgnoreCase)) &&
-            string.Equals(t.SenhaProfessor?.Trim(), pass));
-
-        if (turmaGlobal != null)
+        if (turmaDoProf != null)
         {
             return Ok(new
             {
                 sucesso = true,
                 tipo = "ProfessorSala",
-                nome = turmaGlobal.NomeProfessor ?? "Professor da Sala",
-                turmaId = (Guid?)turmaGlobal.Id,
-                turmaNome = turmaGlobal.Nome,
-                escolaNome = turmaGlobal.Escola?.Nome,
-                tokenEscola = turmaGlobal.Escola?.TokenAcesso
+                nome = turmaDoProf.NomeProfessor ?? "Professor da Sala",
+                turmaId = (Guid?)turmaDoProf.Id,
+                turmaNome = turmaDoProf.Nome
             });
         }
 

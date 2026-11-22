@@ -36,13 +36,6 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
-    // Garante que novas colunas adicionadas existem em bancos SQLite existentes sem quebrar o servidor
-    try { db.Database.ExecuteSqlRaw("ALTER TABLE Municipios ADD COLUMN DataExpiracaoContrato TEXT NULL;"); } catch { }
-    try { db.Database.ExecuteSqlRaw("ALTER TABLE Municipios ADD COLUMN NumeroConvenio TEXT NULL;"); } catch { }
-    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN LoginProfessor TEXT NULL;"); } catch { }
-    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN SenhaProfessor TEXT NULL;"); } catch { }
-    try { db.Database.ExecuteSqlRaw("ALTER TABLE Turmas ADD COLUMN NomeProfessor TEXT NULL;"); } catch { }
-
     if (!db.Escolas.Any())
     {
         var mun1 = new Municipio { Nome = "Campinas", UF = "SP" };
