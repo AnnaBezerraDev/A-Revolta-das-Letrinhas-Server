@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>A Revolta das Letrinhas — Gestão Escolar e Desempenho de Salas</title>
+  <title>A Revolta das Letrinhas — Gestão Escolar, Prefeituras e Salas</title>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -39,15 +39,15 @@
       display: flex; align-items: center; gap: 6px;
     }
 
-    .container { max-width: 1250px; margin: 25px auto; padding: 0 20px; }
+    .container { max-width: 1300px; margin: 25px auto; padding: 0 20px; }
 
     /* NAVEGAÇÃO DE ABAS */
     .tabs {
-      display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 2px solid var(--border); padding-bottom: 10px;
+      display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 2px solid var(--border); padding-bottom: 10px; flex-wrap: wrap;
     }
     .tab-btn {
-      background: transparent; border: none; font-size: 16px; font-weight: 700; color: var(--text-muted);
-      padding: 10px 20px; border-radius: 10px; cursor: pointer; transition: all 0.2s;
+      background: transparent; border: none; font-size: 15px; font-weight: 700; color: var(--text-muted);
+      padding: 10px 18px; border-radius: 10px; cursor: pointer; transition: all 0.2s;
     }
     .tab-btn.active {
       background: var(--primary); color: white; box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
@@ -55,7 +55,7 @@
 
     /* CARDS DE MÉTRICAS */
     .metrics-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 25px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 25px;
     }
     .metric-card {
       background: var(--card-bg); border-radius: 14px; padding: 18px 20px;
@@ -81,10 +81,10 @@
     }
     .card-title {
       font-family: 'Fredoka', cursive; font-size: 20px; color: var(--text);
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 12px;
     }
 
-    /* FILTRO DE ESCOLA */
+    /* BARRA DE FILTRO E EXPORTAÇÃO */
     .filter-bar {
       display: flex; gap: 15px; align-items: center; flex-wrap: wrap; background: #F1F5F9;
       padding: 14px 18px; border-radius: 12px; margin-bottom: 20px;
@@ -92,33 +92,45 @@
     .filter-bar label { font-weight: 700; font-size: 14px; color: #334155; }
     .filter-bar select {
       padding: 8px 14px; border-radius: 8px; border: 1px solid #CBD5E1; font-size: 14px;
-      font-weight: 600; background: white; min-width: 280px;
+      font-weight: 600; background: white; min-width: 260px;
     }
+
+    /* BANNER DE EXPIRAÇÃO DA PREFEITURA */
+    .prefeitura-banner {
+      background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
+      border: 1px solid #BFDBFE; border-radius: 12px; padding: 14px 20px;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;
+    }
+    .badge-exp-ok { background: #DCFCE7; color: #166534; font-weight: 800; padding: 4px 10px; border-radius: 12px; }
+    .badge-exp-warning { background: #FEF3C7; color: #92400E; font-weight: 800; padding: 4px 10px; border-radius: 12px; }
+    .badge-exp-danger { background: #FEE2E2; color: #991B1B; font-weight: 800; padding: 4px 10px; border-radius: 12px; }
 
     /* DESEMPENHO POR SALA (CARDS DE SALAS) */
     .salas-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 25px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px; margin-bottom: 25px;
     }
     .sala-card {
       background: #FFFFFF; border: 1px solid var(--border); border-radius: 14px; padding: 20px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04); transition: transform 0.2s, box-shadow 0.2s; position: relative;
     }
     .sala-card:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(0,0,0,0.06); }
     .sala-header {
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
       border-bottom: 1px solid #F1F5F9; padding-bottom: 10px;
     }
     .sala-header h4 { font-size: 18px; font-weight: 800; color: #1E293B; }
+    
+    .prof-tag {
+      background: #F3E8FF; color: #6B21A8; font-size: 12px; font-weight: 700;
+      padding: 4px 8px; border-radius: 6px; display: inline-block; margin-bottom: 12px;
+    }
+
     .progress-group { margin-bottom: 12px; }
     .progress-label {
       display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 4px;
     }
-    .progress-bar-bg {
-      height: 10px; background: #E2E8F0; border-radius: 6px; overflow: hidden;
-    }
-    .progress-bar-fill {
-      height: 100%; border-radius: 6px; transition: width 0.6s ease;
-    }
+    .progress-bar-bg { height: 10px; background: #E2E8F0; border-radius: 6px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 6px; transition: width 0.6s ease; }
     .fill-port { background: linear-gradient(90deg, #3B82F6, #60A5FA); }
     .fill-math { background: linear-gradient(90deg, #10B981, #34D399); }
 
@@ -138,24 +150,26 @@
     tr:hover td { background: #F8FAFC; }
 
     /* BADGES */
-    .badge {
-      display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;
-    }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; }
     .badge-token { background: #EEF2FF; color: #4338CA; font-family: monospace; border: 1px solid #C7D2FE; }
     .badge-status-excelente { background: #DCFCE7; color: #166534; }
     .badge-status-bom { background: #E0F2FE; color: #075985; }
     .badge-status-progresso { background: #FEF3C7; color: #92400E; }
     .badge-status-apoio { background: #FEE2E2; color: #991B1B; font-weight: 800; }
 
-    /* BOTÕES E FORMULÁRIOS */
+    /* BOTÕES */
     .btn {
       background: var(--primary); color: white; border: none; padding: 9px 18px; border-radius: 8px;
-      font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s;
+      font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
     }
     .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
     .btn-sm { padding: 6px 12px; font-size: 12px; }
     .btn-accent { background: var(--accent); color: #78350F; }
     .btn-accent:hover { background: #D97706; color: white; }
+    .btn-success { background: var(--success); color: white; }
+    .btn-success:hover { background: #059669; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-danger:hover { background: #DC2626; }
 
     .forms-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;
@@ -169,22 +183,17 @@
     .form-group input, .form-group select {
       width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid #CBD5E1; font-size: 14px; font-family: inherit;
     }
-
-    .sim-bar {
-      background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 12px; padding: 14px 20px;
-      display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 25px;
-    }
   </style>
 </head>
 <body>
   <header>
     <div>
       <h1>✨ A Revolta das Letrinhas</h1>
-      <p style="font-size: 13px; opacity: 0.9; margin-top: 3px;">Servidor Centralizado de Escolas e Desempenho Escolar (.NET + Banco)</p>
+      <p style="font-size: 13px; opacity: 0.9; margin-top: 3px;">Painel de Gestão Municipal e Escolar — Parceria com Prefeituras</p>
     </div>
     <div class="status-badge">
       <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:white;"></span>
-      SERVIDOR CONECTADO (Porta 5000)
+      SERVIDOR NUVEM ATIVO (api.kairosstudios.site)
     </div>
   </header>
 
@@ -193,7 +202,7 @@
     <div class="metrics-grid">
       <div class="metric-card">
         <div class="metric-icon icon-mun">🏛️</div>
-        <div class="metric-data"><h3 id="totMunicipios">0</h3><p>Municípios</p></div>
+        <div class="metric-data"><h3 id="totMunicipios">0</h3><p>Prefeituras / Municípios</p></div>
       </div>
       <div class="metric-card">
         <div class="metric-icon icon-esc">🏫</div>
@@ -205,29 +214,19 @@
       </div>
       <div class="metric-card">
         <div class="metric-icon icon-alu">🎒</div>
-        <div class="metric-data"><h3 id="totAlunos">0</h3><p>Alunos Cadastrados</p></div>
+        <div class="metric-data"><h3 id="totAlunos">0</h3><p>Alunos Atendidos</p></div>
       </div>
       <div class="metric-card">
         <div class="metric-icon icon-fas">⭐</div>
-        <div class="metric-data"><h3 id="totFases">0</h3><p>Fases Concluídas</p></div>
+        <div class="metric-data"><h3 id="totFases">0</h3><p>Atividades Realizadas</p></div>
       </div>
-    </div>
-
-    <!-- SIMULADOR RÁPIDO DO JOGO .EXE -->
-    <div class="sim-bar">
-      <div>
-        <strong style="color: #92400E; font-size: 15px;">🎮 Testar Sincronização do Jogo .EXE:</strong>
-        <span style="font-size: 13px; color: #B45309; display: block; margin-top: 2px;">
-          Simula o jogo .exe no computador da escola enviando uma fase concluída para o servidor.
-        </span>
-      </div>
-      <button class="btn btn-accent" onclick="simularEnvioJogo()">Simular Aluno Passando de Fase 🚀</button>
     </div>
 
     <!-- ABAS -->
     <div class="tabs">
       <button class="tab-btn active" id="btnTabSalas" onclick="mudarAba('salas')">📊 Desempenho Geral por Sala (Professores)</button>
-      <button class="tab-btn" id="btnTabGestao" onclick="mudarAba('gestao')">⚙️ Cadastrar Escolas, Salas e Alunos (Admin)</button>
+      <button class="tab-btn" id="btnTabPrefeituras" onclick="mudarAba('prefeituras')">🏛️ Contratos com Prefeituras e Expiração</button>
+      <button class="tab-btn" id="btnTabGestao" onclick="mudarAba('gestao')">⚙️ Cadastros e Gestão (Escolas, Salas e Professores)</button>
     </div>
 
     <!-- ABA 1: DESEMPENHO POR SALA -->
@@ -236,8 +235,18 @@
         <div class="filter-bar">
           <label for="selectEscolaFiltro">🏫 Selecionar Escola:</label>
           <select id="selectEscolaFiltro" onchange="aoTrocarEscola()"></select>
-          <span style="font-size: 13px; color: #64748B; margin-left: auto;" id="tokenEscolaExibicao"></span>
+          
+          <button class="btn btn-sm btn-success" onclick="baixarDadosEscolaCsv()" title="Baixar relatório completo compatível com Excel">
+            📥 Baixar Dados da Escola (CSV / Excel)
+          </button>
+
+          <button class="btn btn-sm btn-danger" onclick="excluirEscolaSelecionada()" style="margin-left: auto;">
+            🗑️ Excluir Escola
+          </button>
         </div>
+
+        <!-- BANNER DE STATUS DO CONTRATO COM A PREFEITURA -->
+        <div id="bannerPrefeitura" class="prefeitura-banner" style="display:none;"></div>
 
         <div class="card-title">
           <span>📈 Desempenho Médio de Cada Sala / Turma</span>
@@ -275,24 +284,55 @@
       </div>
     </div>
 
-    <!-- ABA 2: GESTÃO E CADASTROS -->
+    <!-- ABA 2: PREFEITURAS E CONTRATOS -->
+    <div id="abaPrefeituras" style="display: none;">
+      <div class="card">
+        <div class="card-title">
+          <span>🏛️ Monitoramento de Contratos com Prefeituras / Municípios</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Município</th>
+              <th>UF</th>
+              <th>Nº Convênio / Contrato</th>
+              <th>Total de Escolas</th>
+              <th>Validade do Contrato</th>
+              <th>Status de Expiração</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabelaMunicipios"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ABA 3: GESTÃO E CADASTROS -->
     <div id="abaGestao" style="display: none;">
       <div class="card">
         <div class="card-title"><span>➕ Cadastros Rápidos no Servidor</span></div>
         <div class="forms-grid">
           
-          <!-- FORM MUNICÍPIO -->
+          <!-- FORM MUNICÍPIO COM CONTRATO -->
           <div class="form-box">
-            <h4>1. Novo Município</h4>
+            <h4>1. Nova Prefeitura / Município</h4>
             <div class="form-group">
               <label>Nome da Cidade:</label>
-              <input type="text" id="cadMunNome" placeholder="Ex: Piracicaba">
+              <input type="text" id="cadMunNome" placeholder="Ex: Campinas">
             </div>
             <div class="form-group">
               <label>UF:</label>
               <input type="text" id="cadMunUf" value="SP" maxlength="2">
             </div>
-            <button class="btn btn-sm" onclick="cadastrarMunicipio()">Salvar Município 💾</button>
+            <div class="form-group">
+              <label>Nº Convênio / Processo:</label>
+              <input type="text" id="cadMunConvenio" placeholder="Ex: CONV-2026/041">
+            </div>
+            <div class="form-group">
+              <label>Data de Expiração do Contrato:</label>
+              <input type="date" id="cadMunExpiracao">
+            </div>
+            <button class="btn btn-sm" onclick="cadastrarMunicipio()">Salvar Prefeitura 💾</button>
           </div>
 
           <!-- FORM ESCOLA -->
@@ -304,27 +344,39 @@
             </div>
             <div class="form-group">
               <label>Nome da Escola:</label>
-              <input type="text" id="cadEscolaNome" placeholder="Ex: E.M. Ziraldo">
+              <input type="text" id="cadEscolaNome" placeholder="Ex: E.M. Paulo Freire">
             </div>
             <div class="form-group">
               <label>Token de Acesso do Jogo (.exe):</label>
-              <input type="text" id="cadEscolaToken" placeholder="Ex: ESC-ZIRALDO-01">
+              <input type="text" id="cadEscolaToken" placeholder="Ex: ESC-PAULO-01">
             </div>
             <button class="btn btn-sm" onclick="cadastrarEscola()">Salvar Escola 💾</button>
           </div>
 
-          <!-- FORM TURMA/SALA -->
+          <!-- FORM TURMA/SALA COM PROFESSOR EXCLUSIVO -->
           <div class="form-box">
-            <h4>3. Nova Sala / Turma</h4>
+            <h4>3. Nova Sala com Professor Exclusivo</h4>
             <div class="form-group">
               <label>Escola:</label>
               <select id="cadTurmaEscola"></select>
             </div>
             <div class="form-group">
               <label>Nome da Sala/Turma:</label>
-              <input type="text" id="cadTurmaNome" placeholder="Ex: 1º Ano B, 2º Ano A">
+              <input type="text" id="cadTurmaNome" placeholder="Ex: 3º Ano A">
             </div>
-            <button class="btn btn-sm" onclick="cadastrarTurma()">Salvar Sala 💾</button>
+            <div class="form-group">
+              <label>Nome do Professor Responsável:</label>
+              <input type="text" id="cadTurmaProfNome" placeholder="Ex: Professora Mariana">
+            </div>
+            <div class="form-group">
+              <label>Usuário de Acesso do Professor:</label>
+              <input type="text" id="cadTurmaProfLogin" placeholder="Ex: prof.mariana">
+            </div>
+            <div class="form-group">
+              <label>Senha do Professor:</label>
+              <input type="text" id="cadTurmaProfSenha" placeholder="Ex: 1234">
+            </div>
+            <button class="btn btn-sm" onclick="cadastrarTurma()">Salvar Sala e Professor 💾</button>
           </div>
 
           <!-- FORM ALUNO -->
@@ -336,11 +388,11 @@
             </div>
             <div class="form-group">
               <label>Nome Completo:</label>
-              <input type="text" id="cadAlunoNome" placeholder="Ex: Pedro Henrique Silva">
+              <input type="text" id="cadAlunoNome" placeholder="Ex: Lucas Ferreira">
             </div>
             <div class="form-group">
               <label>Apelido no Jogo (.exe):</label>
-              <input type="text" id="cadAlunoJogo" placeholder="Ex: Pedrinho">
+              <input type="text" id="cadAlunoJogo" placeholder="Ex: Lucas">
             </div>
             <button class="btn btn-sm" onclick="cadastrarAluno()">Salvar Aluno 💾</button>
           </div>
@@ -357,8 +409,11 @@
 
     function mudarAba(aba) {
       document.getElementById('abaSalas').style.display = aba === 'salas' ? 'block' : 'none';
+      document.getElementById('abaPrefeituras').style.display = aba === 'prefeituras' ? 'block' : 'none';
       document.getElementById('abaGestao').style.display = aba === 'gestao' ? 'block' : 'none';
+      
       document.getElementById('btnTabSalas').classList.toggle('active', aba === 'salas');
+      document.getElementById('btnTabPrefeituras').classList.toggle('active', aba === 'prefeituras');
       document.getElementById('btnTabGestao').classList.toggle('active', aba === 'gestao');
     }
 
@@ -374,18 +429,63 @@
         document.getElementById('totFases').innerText = dadosGerais.metricas.totalFasesConcluidas;
 
         atualizarSelects();
+        renderizarTabelaMunicipios();
 
         if (dadosGerais.escolas.length > 0) {
-          if (!escolaAtualId) escolaAtualId = dadosGerais.escolas[0].id;
+          if (!escolaAtualId || !dadosGerais.escolas.some(e => e.id === escolaAtualId)) {
+            escolaAtualId = dadosGerais.escolas[0].id;
+          }
           carregarSalasEscola(escolaAtualId);
+        } else {
+          document.getElementById('containerSalas').innerHTML = '<p style="color:#64748B;">Nenhuma escola cadastrada.</p>';
         }
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
       }
     }
 
+    function renderizarTabelaMunicipios() {
+      const tbody = document.getElementById('tabelaMunicipios');
+      tbody.innerHTML = '';
+
+      if (!dadosGerais.municipios || dadosGerais.municipios.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Nenhum município cadastrado.</td></tr>';
+        return;
+      }
+
+      dadosGerais.municipios.forEach(m => {
+        let statusBadge = '<span class="badge" style="background:#E2E8F0; color:#475569;">Não Definida</span>';
+        let dataStr = '-';
+
+        if (m.dataExpiracaoContrato) {
+          const d = new Date(m.dataExpiracaoContrato);
+          dataStr = d.toLocaleDateString('pt-BR');
+          if (m.diasRestantes < 0) {
+            statusBadge = `<span class="badge-exp-danger">CONTRATO EXPIRADO (${Math.abs(m.diasRestantes)} dias atrás) 🚫</span>`;
+          } else if (m.diasRestantes <= 30) {
+            statusBadge = `<span class="badge-exp-warning">EXPIRA EM ${m.diasRestantes} DIAS ⚠️</span>`;
+          } else {
+            statusBadge = `<span class="badge-exp-ok">ATIVO (${m.diasRestantes} dias restantes) ✅</span>`;
+          }
+        }
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>🏛️ ${m.nome}</strong></td>
+          <td>${m.uf}</td>
+          <td><code>${m.numeroConvenio || 'Pendente'}</code></td>
+          <td>${m.totalEscolas} escolas</td>
+          <td>${dataStr}</td>
+          <td>${statusBadge}</td>
+          <td>
+            <button class="btn btn-sm btn-danger" onclick="excluirMunicipio('${m.id}', '${m.nome}')">🗑️ Excluir</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
     function atualizarSelects() {
-      // Select da Escola no filtro
       const selFiltro = document.getElementById('selectEscolaFiltro');
       const selTurmaEscola = document.getElementById('cadTurmaEscola');
       selFiltro.innerHTML = '';
@@ -403,7 +503,6 @@
 
       if (escolaAtualId) selFiltro.value = escolaAtualId;
 
-      // Select de Municípios no cadastro de escola
       const selMun = document.getElementById('cadEscolaMun');
       selMun.innerHTML = '';
       dadosGerais.municipios.forEach(m => {
@@ -429,10 +528,31 @@
         const data = await res.json();
         salasDaEscolaAtual = data.salas || [];
 
-        document.getElementById('tokenEscolaExibicao').innerHTML = 
-          `Token para o <strong>config_escola.json</strong> do .exe: <span class="badge badge-token">${data.tokenAcesso}</span>`;
+        // Atualiza o Banner de Expiração da Prefeitura
+        const banner = document.getElementById('bannerPrefeitura');
+        if (data.dataExpiracao) {
+          const dExp = new Date(data.dataExpiracao);
+          const diffDays = Math.ceil((dExp - new Date()) / (1000 * 60 * 60 * 24));
+          banner.style.display = 'flex';
+          banner.innerHTML = `
+            <div>
+              <strong>🏛️ Prefeitura / Convênio:</strong> ${data.municipio} | 
+              <strong>Validade do Contrato:</strong> ${dExp.toLocaleDateString('pt-BR')} 
+              (${diffDays >= 0 ? `<span class="badge-exp-ok">${diffDays} dias restantes</span>` : `<span class="badge-exp-danger">EXPIRADO</span>`})
+            </div>
+            <div>
+              Token da Escola no Jogo: <span class="badge badge-token">${data.tokenAcesso}</span>
+            </div>
+          `;
+        } else {
+          banner.style.display = 'flex';
+          banner.innerHTML = `
+            <div><strong>🏛️ Município:</strong> ${data.municipio} (Sem data de expiração cadastrada)</div>
+            <div>Token da Escola: <span class="badge badge-token">${data.tokenAcesso}</span></div>
+          `;
+        }
 
-        // Preenche também o select de turmas para cadastro de aluno
+        // Preenche o select de turmas para cadastro de aluno
         const selAlunoTurma = document.getElementById('cadAlunoTurma');
         selAlunoTurma.innerHTML = '';
         salasDaEscolaAtual.forEach(s => {
@@ -449,12 +569,24 @@
 
         container.innerHTML = '';
         salasDaEscolaAtual.forEach(sala => {
+          const profInfo = sala.nomeProfessor 
+            ? `👨‍🏫 Prof. ${sala.nomeProfessor} (login: <code>${sala.loginProfessor}</code>)` 
+            : `👨‍🏫 Nenhum professor específico vinculado`;
+
           const card = document.createElement('div');
           card.className = 'sala-card';
           card.innerHTML = `
             <div class="sala-header">
               <h4>🚪 ${sala.nomeTurma}</h4>
-              <span class="badge" style="background:#EEF2FF; color:#4338CA;">${sala.totalAlunos} Alunos</span>
+              <button class="btn btn-sm btn-danger" style="padding:3px 8px; font-size:11px;" onclick="excluirSala('${sala.turmaId}', '${sala.nomeTurma}')" title="Excluir Sala">
+                🗑️
+              </button>
+            </div>
+
+            <div class="prof-tag">${profInfo}</div>
+
+            <div style="font-size:13px; font-weight:700; margin-bottom:10px; color:#4338CA;">
+              🎒 ${sala.totalAlunos} Alunos Cadastrados
             </div>
 
             <!-- Progresso Português -->
@@ -511,7 +643,7 @@
       tbody.innerHTML = '';
 
       if (!sala.alunos || sala.alunos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Nenhum aluno cadastrado nesta turma ainda.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">Nenhum aluno cadastrado nesta turma ainda.</td></tr>';
         return;
       }
 
@@ -531,18 +663,80 @@
           <td>⭐ ${a.mediaEstrelas}</td>
           <td><span style="color: ${a.errosTotais > 3 ? '#DC2626' : '#16A34A'}">${a.errosTotais}</span></td>
           <td>${statusBadge}</td>
-          <td><button class="btn btn-sm" style="background:#EF4444; padding:4px 8px; font-size:11px;" onclick="excluirAlunoPainel('${a.id}', '${a.nomeCompleto}')">🗑️ Excluir</button></td>
+          <td><button class="btn btn-sm btn-danger" style="padding:4px 8px; font-size:11px;" onclick="excluirAlunoPainel('${a.id}', '${a.nomeCompleto}')">🗑️ Excluir</button></td>
         `;
         tbody.appendChild(tr);
       });
     }
 
+    /* DOWNLOAD DOS DADOS DA ESCOLA (CSV / EXCEL) */
+    function baixarDadosEscolaCsv() {
+      if (!escolaAtualId) return alert("Selecione uma escola primeiro.");
+      window.location.href = `/api/admin/escola/${escolaAtualId}/exportar-csv`;
+    }
+
+    /* EXCLUSÕES */
+    async function excluirEscolaSelecionada() {
+      if (!escolaAtualId) return;
+      const escola = dadosGerais.escolas.find(e => e.id === escolaAtualId);
+      const nome = escola ? escola.nome : "esta escola";
+      
+      if (!confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a escola "${nome}"?\nTodas as salas e alunos vinculados serão removidos!`)) return;
+
+      try {
+        const res = await fetch(`/api/admin/escolas/${escolaAtualId}`, { method: 'DELETE' });
+        if (res.ok) {
+          alert(`Escola "${nome}" excluída com sucesso!`);
+          escolaAtualId = null;
+          recarregarDados();
+        } else {
+          alert("Erro ao excluir escola.");
+        }
+      } catch (err) {
+        alert("Erro na requisição: " + err);
+      }
+    }
+
+    async function excluirSala(turmaId, nomeTurma) {
+      if (!confirm(`Deseja realmente excluir a sala "${nomeTurma}" e todos os alunos cadastrados nela?`)) return;
+
+      try {
+        const res = await fetch(`/api/admin/turmas/${turmaId}`, { method: 'DELETE' });
+        if (res.ok) {
+          alert(`Sala "${nomeTurma}" excluída com sucesso!`);
+          carregarSalasEscola(escolaAtualId);
+          recarregarDados();
+        } else {
+          alert("Erro ao excluir sala.");
+        }
+      } catch (err) {
+        alert("Erro na requisição: " + err);
+      }
+    }
+
+    async function excluirMunicipio(munId, nomeMun) {
+      if (!confirm(`⚠️ Deseja realmente excluir o município "${nomeMun}"?\nTodas as escolas pertencentes a este município serão excluídas!`)) return;
+
+      try {
+        const res = await fetch(`/api/admin/municipios/${munId}`, { method: 'DELETE' });
+        if (res.ok) {
+          alert(`Município "${nomeMun}" excluído com sucesso!`);
+          recarregarDados();
+        } else {
+          alert("Erro ao excluir município.");
+        }
+      } catch (err) {
+        alert("Erro na requisição: " + err);
+      }
+    }
+
     async function excluirAlunoPainel(id, nome) {
-      if (!confirm(`Deseja realmente excluir o aluno "${nome}" do servidor e do jogo?`)) return;
+      if (!confirm(`Deseja realmente excluir o aluno "${nome}"?`)) return;
       try {
         const res = await fetch(`/api/admin/alunos/${id}`, { method: 'DELETE' });
         if (res.ok) {
-          alert(`Aluno "${nome}" foi excluído com sucesso do banco de dados!`);
+          alert(`Aluno "${nome}" foi excluído com sucesso!`);
+          carregarSalasEscola(escolaAtualId);
           recarregarDados();
         }
       } catch (err) {
@@ -554,15 +748,24 @@
     async function cadastrarMunicipio() {
       const nome = document.getElementById('cadMunNome').value;
       const uf = document.getElementById('cadMunUf').value;
+      const numeroConvenio = document.getElementById('cadMunConvenio').value;
+      const dataExp = document.getElementById('cadMunExpiracao').value;
       if (!nome) return alert("Digite o nome da cidade.");
 
       await fetch('/api/admin/municipios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome, uf })
+        body: JSON.stringify({
+          nome,
+          uf,
+          numeroConvenio: numeroConvenio || null,
+          dataExpiracaoContrato: dataExp ? new Date(dataExp).toISOString() : null
+        })
       });
       document.getElementById('cadMunNome').value = '';
-      alert("Município salvo com sucesso!");
+      document.getElementById('cadMunConvenio').value = '';
+      document.getElementById('cadMunExpiracao').value = '';
+      alert("Prefeitura / Município cadastrado com sucesso!");
       recarregarDados();
     }
 
@@ -587,15 +790,28 @@
     async function cadastrarTurma() {
       const escolaId = document.getElementById('cadTurmaEscola').value;
       const nome = document.getElementById('cadTurmaNome').value;
+      const nomeProfessor = document.getElementById('cadTurmaProfNome').value;
+      const loginProfessor = document.getElementById('cadTurmaProfLogin').value;
+      const senhaProfessor = document.getElementById('cadTurmaProfSenha').value;
+
       if (!nome) return alert("Digite o nome da sala/turma.");
 
       await fetch('/api/admin/turmas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ escolaId, nome })
+        body: JSON.stringify({
+          escolaId,
+          nome,
+          nomeProfessor: nomeProfessor || null,
+          loginProfessor: loginProfessor || null,
+          senhaProfessor: senhaProfessor || null
+        })
       });
       document.getElementById('cadTurmaNome').value = '';
-      alert("Sala/Turma salva com sucesso!");
+      document.getElementById('cadTurmaProfNome').value = '';
+      document.getElementById('cadTurmaProfLogin').value = '';
+      document.getElementById('cadTurmaProfSenha').value = '';
+      alert("Sala e Professor cadastrados com sucesso!");
       recarregarDados();
     }
 
@@ -614,41 +830,6 @@
       document.getElementById('cadAlunoJogo').value = '';
       alert("Aluno cadastrado com sucesso!");
       recarregarDados();
-    }
-
-    async function simularEnvioJogo() {
-      try {
-        const escolaRes = await fetch(`/api/jogo/conectar?token=${dadosGerais.escolas[0].tokenAcesso}`);
-        const escola = await escolaRes.json();
-        if (!escola.turmas || escola.turmas.length === 0 || escola.turmas[0].alunos.length === 0) {
-          return alert("Nenhum aluno cadastrado para simular.");
-        }
-
-        const aluno = escola.turmas[0].alunos[0];
-        const faseNum = Math.floor(Math.random() * 10) + 1;
-        const materia = Math.random() > 0.5 ? "Portugues" : "Matematica";
-
-        await fetch(`/api/jogo/progresso?token=${escola.tokenAcesso}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            alunoId: aluno.id,
-            materia: materia,
-            nivel: "Facil",
-            numeroFase: faseNum,
-            concluida: true,
-            estrelas: 3,
-            pontuacao: 1850,
-            quantidadeErros: Math.floor(Math.random() * 2),
-            tempoGastoSegundos: 39
-          })
-        });
-
-        alert(`🎮 Progresso recebido do .exe!\nAluno: ${aluno.nomeJogo}\nFase: ${materia} ${faseNum} completada!`);
-        recarregarDados();
-      } catch (err) {
-        alert("Erro ao simular: " + err);
-      }
     }
 
     window.onload = recarregarDados;

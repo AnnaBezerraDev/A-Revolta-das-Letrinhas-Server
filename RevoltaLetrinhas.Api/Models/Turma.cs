@@ -15,5 +15,23 @@ public class Turma
 
     public int AnoLetivo { get; set; } = DateTime.UtcNow.Year;
 
+    /// <summary>
+    /// Nome do professor responsável pela turma/sala
+    /// </summary>
+    [MaxLength(100)]
+    public string? NomeProfessor { get; set; }
+
+    /// <summary>
+    /// Usuário exclusivo do professor para login nesta turma (ex: "prof.mariana")
+    /// </summary>
+    [MaxLength(50)]
+    public string? LoginProfessor { get; set; }
+
+    /// <summary>
+    /// Senha de acesso exclusivo do professor para esta turma
+    /// </summary>
+    [MaxLength(100)]
+    public string? SenhaProfessor { get; set; }
+
     public List<Aluno> Alunos { get; set; } = new();
 }

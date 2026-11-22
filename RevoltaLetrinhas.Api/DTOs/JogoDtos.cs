@@ -38,6 +38,8 @@ public class TurmaComAlunosDto
 {
     public Guid TurmaId { get; set; }
     public string Nome { get; set; } = string.Empty;
+    public string? NomeProfessor { get; set; }
+    public string? LoginProfessor { get; set; }
     public List<AlunoResumoDto> Alunos { get; set; } = new();
 }
 
@@ -47,6 +49,10 @@ public class InfoEscolaDto
     public string NomeEscola { get; set; } = string.Empty;
     public string Municipio { get; set; } = string.Empty;
     public string UF { get; set; } = string.Empty;
+    public DateTime? DataExpiracaoContrato { get; set; }
+    public string? NumeroConvenio { get; set; }
+    public int? DiasRestantesContrato { get; set; }
+    public bool ContratoValido { get; set; } = true;
     public string TokenAcesso { get; set; } = string.Empty;
     public List<TurmaComAlunosDto> Turmas { get; set; } = new();
 }
@@ -57,5 +63,12 @@ public class EscolaDisponivelDto
     public string Nome { get; set; } = string.Empty;
     public string Municipio { get; set; } = string.Empty;
     public string UF { get; set; } = string.Empty;
+    public DateTime? DataExpiracaoContrato { get; set; }
     public int TotalAlunos { get; set; }
+}
+
+public class LoginProfessorDto
+{
+    public string Login { get; set; } = string.Empty;
+    public string Senha { get; set; } = string.Empty;
 }

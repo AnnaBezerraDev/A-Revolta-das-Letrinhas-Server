@@ -37,6 +37,7 @@ public class JogoController : ControllerBase
                 Nome = e.Nome,
                 Municipio = e.Municipio != null ? e.Municipio.Nome : "Geral",
                 UF = e.Municipio != null ? e.Municipio.UF : "SP",
+                DataExpiracaoContrato = e.Municipio != null ? e.Municipio.DataExpiracaoContrato : null,
                 TotalAlunos = e.Turmas.SelectMany(t => t.Alunos).Count()
             })
             .ToListAsync();
@@ -67,17 +68,29 @@ public class JogoController : ControllerBase
             return NotFound(new { erro = $"Escola com token '{tokenEfetivo}' não encontrada ou inativa." });
         }
 
+        DateTime? expContrato = escola.Municipio?.DataExpiracaoContrato;
+        int? diasRestantes = expContrato.HasValue
+            ? (int)Math.Ceiling((expContrato.Value - DateTime.UtcNow).TotalDays)
+            : null;
+        bool contratoValido = !diasRestantes.HasValue || diasRestantes.Value >= 0;
+
         var info = new InfoEscolaDto
         {
             EscolaId = escola.Id,
             NomeEscola = escola.Nome,
             Municipio = escola.Municipio?.Nome ?? "Geral",
             UF = escola.Municipio?.UF ?? "BR",
+            DataExpiracaoContrato = expContrato,
+            NumeroConvenio = escola.Municipio?.NumeroConvenio,
+            DiasRestantesContrato = diasRestantes,
+            ContratoValido = contratoValido,
             TokenAcesso = escola.TokenAcesso,
             Turmas = escola.Turmas.Select(t => new TurmaComAlunosDto
             {
                 TurmaId = t.Id,
                 Nome = t.Nome,
+                NomeProfessor = t.NomeProfessor,
+                LoginProfessor = t.LoginProfessor,
                 Alunos = t.Alunos.Select(a => new AlunoResumoDto
                 {
                     Id = a.Id,
@@ -90,6 +103,61 @@ public class JogoController : ControllerBase
         };
 
         return Ok(info);
+    }
+
+    /// <summary>
+    /// Validação de login de professor (Geral ou Específico de Turma/Sala)
+    /// </summary>
+    [HttpPost("login-professor")]
+    public async Task<IActionResult> AutenticarProfessor(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] LoginProfessorDto dto)
+    {
+        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
+        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token da escola não informado.");
+
+        var escola = await _db.Escolas
+            .Include(e => e.Turmas)
+                .ThenInclude(t => t.Alunos)
+            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+
+        if (escola == null) return NotFound("Escola não encontrada.");
+
+        string user = dto.Login.Trim().ToLower();
+        string pass = dto.Senha.Trim();
+
+        // 1. Verifica se é o admin padrão da escola
+        if (user == "professor" && pass == "1234")
+        {
+            return Ok(new
+            {
+                sucesso = true,
+                tipo = "AdministradorEscola",
+                nome = "Professor(a) Geral",
+                turmaId = (Guid?)null,
+                turmaNome = "Todas as Salas"
+            });
+        }
+
+        // 2. Verifica se é um professor exclusivo cadastrado em alguma sala
+        var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
+            string.Equals(t.LoginProfessor, user, StringComparison.OrdinalIgnoreCase) &&
+            t.SenhaProfessor == pass);
+
+        if (turmaDoProf != null)
+        {
+            return Ok(new
+            {
+                sucesso = true,
+                tipo = "ProfessorSala",
+                nome = turmaDoProf.NomeProfessor ?? "Professor da Sala",
+                turmaId = (Guid?)turmaDoProf.Id,
+                turmaNome = turmaDoProf.Nome
+            });
+        }
+
+        return Unauthorized(new { sucesso = false, erro = "Usuário ou senha do professor incorretos." });
     }
 
     /// <summary>

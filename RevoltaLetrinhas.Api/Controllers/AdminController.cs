@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
@@ -45,7 +46,18 @@ public class AdminController : ControllerBase
             .ToListAsync();
 
         var municipios = await _db.Municipios
-            .Select(m => new { m.Id, m.Nome, m.UF, TotalEscolas = m.Escolas.Count })
+            .Select(m => new
+            {
+                m.Id,
+                m.Nome,
+                m.UF,
+                m.DataExpiracaoContrato,
+                m.NumeroConvenio,
+                TotalEscolas = m.Escolas.Count,
+                DiasRestantes = m.DataExpiracaoContrato.HasValue
+                    ? (int)Math.Ceiling((m.DataExpiracaoContrato.Value - DateTime.UtcNow).TotalDays)
+                    : (int?)null
+            })
             .ToListAsync();
 
         return Ok(new
@@ -125,7 +137,6 @@ public class AdminController : ControllerBase
             }
 
             int totalAlunos = turma.Alunos.Count;
-            // Cada matéria tem 30 fases (total 60)
             double taxaPort = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesPort) / (totalAlunos * 30) * 100, 1) : 0;
             double taxaMath = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesMath) / (totalAlunos * 30) * 100, 1) : 0;
 
@@ -134,6 +145,8 @@ public class AdminController : ControllerBase
                 TurmaId = turma.Id,
                 NomeTurma = turma.Nome,
                 AnoLetivo = turma.AnoLetivo,
+                NomeProfessor = turma.NomeProfessor,
+                LoginProfessor = turma.LoginProfessor,
                 TotalAlunos = totalAlunos,
                 TotalFasesConcluidas = somaFases,
                 MediaFasesPorAluno = totalAlunos > 0 ? Math.Round((double)somaFases / totalAlunos, 1) : 0,
@@ -150,9 +163,54 @@ public class AdminController : ControllerBase
             EscolaId = escola.Id,
             NomeEscola = escola.Nome,
             Municipio = escola.Municipio != null ? $"{escola.Municipio.Nome}/{escola.Municipio.UF}" : "Geral",
+            DataExpiracao = escola.Municipio?.DataExpiracaoContrato,
             TokenAcesso = escola.TokenAcesso,
             Salas = salasResumo
         });
+    }
+
+    /// <summary>
+    /// Exportação e download oficial dos dados pedagógicos da escola em formato CSV (compatível com Excel)
+    /// </summary>
+    [HttpGet("escola/{escolaId:guid}/exportar-csv")]
+    public async Task<IActionResult> ExportarDadosEscolaCsv(Guid escolaId)
+    {
+        var escola = await _db.Escolas
+            .Include(e => e.Municipio)
+            .Include(e => e.Turmas)
+                .ThenInclude(t => t.Alunos)
+                    .ThenInclude(a => a.Progressos)
+            .FirstOrDefaultAsync(e => e.Id == escolaId);
+
+        if (escola == null) return NotFound("Escola não encontrada.");
+
+        var sb = new StringBuilder();
+        // Cabeçalho CSV
+        sb.AppendLine("Municipio;Escola;TokenEscola;Turma;ProfessorResponsavel;AlunoNomeCompleto;NomeNoJogo;FasesPortugues;FasesMatematica;TotalFases;Pontuacao;MediaEstrelas;ErrosTotais;StatusDesempenho;UltimaAtividade");
+
+        string munNome = escola.Municipio != null ? $"{escola.Municipio.Nome}-{escola.Municipio.UF}" : "Geral";
+
+        foreach (var turma in escola.Turmas.OrderBy(t => t.Nome))
+        {
+            foreach (var aluno in turma.Alunos.Where(a => a.Ativo).OrderBy(a => a.NomeCompleto))
+            {
+                int port = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Portugues");
+                int math = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Matematica");
+                int total = aluno.Progressos.Count(p => p.Concluida);
+                int pontos = aluno.Progressos.Sum(p => p.Pontuacao);
+                int erros = aluno.Progressos.Sum(p => p.QuantidadeErros);
+                double estrelas = aluno.Progressos.Any() ? Math.Round(aluno.Progressos.Average(p => p.Estrelas), 1) : 0;
+                string status = total >= 10 ? (erros <= 3 ? "Excelente" : "Bom") : (total > 0 ? (erros > 5 ? "Precisa de Apoio" : "Em Progresso") : "Sem Atividade");
+                string ultimaAtiv = aluno.Progressos.Any() ? aluno.Progressos.Max(p => p.UltimaAtualizacao).ToString("dd/MM/yyyy HH:mm") : "-";
+
+                sb.AppendLine($"{munNome};{escola.Nome};{escola.TokenAcesso};{turma.Nome};{turma.NomeProfessor ?? "Nenhum"};{aluno.NomeCompleto};{aluno.NomeJogo};{port};{math};{total};{pontos};{estrelas};{erros};{status};{ultimaAtiv}");
+            }
+        }
+
+        byte[] buffer = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        string filename = $"Relatorio_Desempenho_{escola.Nome.Replace(" ", "_")}_{DateTime.Now:yyyyMMdd}.csv";
+
+        return File(buffer, "text/csv; charset=utf-8", filename);
     }
 
     [HttpPost("municipios")]
@@ -164,11 +222,59 @@ public class AdminController : ControllerBase
             Id = Guid.NewGuid(),
             Nome = dto.Nome.Trim(),
             UF = (dto.UF ?? "SP").Trim().ToUpper(),
+            DataExpiracaoContrato = dto.DataExpiracaoContrato,
+            NumeroConvenio = dto.NumeroConvenio?.Trim(),
             DataCriacao = DateTime.UtcNow
         };
         _db.Municipios.Add(mun);
         await _db.SaveChangesAsync();
         return Ok(mun);
+    }
+
+    [HttpPut("municipios/{municipioId:guid}/contrato")]
+    public async Task<IActionResult> AtualizarContratoMunicipio(Guid municipioId, [FromBody] AtualizarMunicipioDto dto)
+    {
+        var mun = await _db.Municipios.FindAsync(municipioId);
+        if (mun == null) return NotFound("Município não encontrado.");
+
+        if (dto.DataExpiracaoContrato.HasValue) mun.DataExpiracaoContrato = dto.DataExpiracaoContrato.Value;
+        if (!string.IsNullOrWhiteSpace(dto.NumeroConvenio)) mun.NumeroConvenio = dto.NumeroConvenio.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Nome)) mun.Nome = dto.Nome.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.UF)) mun.UF = dto.UF.Trim().ToUpper();
+
+        await _db.SaveChangesAsync();
+        return Ok(mun);
+    }
+
+    [HttpDelete("municipios/{municipioId:guid}")]
+    public async Task<IActionResult> ExcluirMunicipio(Guid municipioId)
+    {
+        var mun = await _db.Municipios
+            .Include(m => m.Escolas)
+                .ThenInclude(e => e.Turmas)
+                    .ThenInclude(t => t.Alunos)
+                        .ThenInclude(a => a.Progressos)
+            .FirstOrDefaultAsync(m => m.Id == municipioId);
+
+        if (mun == null) return NotFound("Município não encontrado.");
+
+        foreach (var escola in mun.Escolas)
+        {
+            foreach (var turma in escola.Turmas)
+            {
+                foreach (var aluno in turma.Alunos)
+                {
+                    _db.ProgressoFases.RemoveRange(aluno.Progressos);
+                }
+                _db.Alunos.RemoveRange(turma.Alunos);
+            }
+            _db.Turmas.RemoveRange(escola.Turmas);
+        }
+        _db.Escolas.RemoveRange(mun.Escolas);
+        _db.Municipios.Remove(mun);
+
+        await _db.SaveChangesAsync();
+        return Ok(new { mensagem = "Município e todos os seus vínculos excluídos com sucesso." });
     }
 
     [HttpPost("escolas")]
@@ -199,6 +305,35 @@ public class AdminController : ControllerBase
         return Ok(escola);
     }
 
+    /// <summary>
+    /// Exclusão de Escola e cascata de suas turmas e alunos
+    /// </summary>
+    [HttpDelete("escolas/{escolaId:guid}")]
+    public async Task<IActionResult> ExcluirEscola(Guid escolaId)
+    {
+        var escola = await _db.Escolas
+            .Include(e => e.Turmas)
+                .ThenInclude(t => t.Alunos)
+                    .ThenInclude(a => a.Progressos)
+            .FirstOrDefaultAsync(e => e.Id == escolaId);
+
+        if (escola == null) return NotFound("Escola não encontrada.");
+
+        foreach (var turma in escola.Turmas)
+        {
+            foreach (var aluno in turma.Alunos)
+            {
+                _db.ProgressoFases.RemoveRange(aluno.Progressos);
+            }
+            _db.Alunos.RemoveRange(turma.Alunos);
+        }
+        _db.Turmas.RemoveRange(escola.Turmas);
+        _db.Escolas.Remove(escola);
+
+        await _db.SaveChangesAsync();
+        return Ok(new { mensagem = $"Escola '{escola.Nome}' excluída com sucesso." });
+    }
+
     [HttpPost("turmas")]
     public async Task<IActionResult> CriarTurma([FromBody] CriarTurmaDto dto)
     {
@@ -211,12 +346,56 @@ public class AdminController : ControllerBase
             Id = Guid.NewGuid(),
             EscolaId = escola.Id,
             Nome = dto.Nome.Trim(),
-            AnoLetivo = dto.AnoLetivo > 0 ? dto.AnoLetivo : DateTime.UtcNow.Year
+            AnoLetivo = dto.AnoLetivo > 0 ? dto.AnoLetivo : DateTime.UtcNow.Year,
+            NomeProfessor = dto.NomeProfessor?.Trim(),
+            LoginProfessor = dto.LoginProfessor?.Trim().ToLower(),
+            SenhaProfessor = dto.SenhaProfessor?.Trim()
         };
 
         _db.Turmas.Add(turma);
         await _db.SaveChangesAsync();
         return Ok(turma);
+    }
+
+    /// <summary>
+    /// Vincula ou atualiza o professor exclusivo responsável por uma turma
+    /// </summary>
+    [HttpPut("turmas/{turmaId:guid}/professor")]
+    public async Task<IActionResult> AtualizarProfessorTurma(Guid turmaId, [FromBody] AtualizarTurmaDto dto)
+    {
+        var turma = await _db.Turmas.FindAsync(turmaId);
+        if (turma == null) return NotFound("Turma/Sala não encontrada.");
+
+        if (!string.IsNullOrWhiteSpace(dto.NomeProfessor)) turma.NomeProfessor = dto.NomeProfessor.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.LoginProfessor)) turma.LoginProfessor = dto.LoginProfessor.Trim().ToLower();
+        if (!string.IsNullOrWhiteSpace(dto.SenhaProfessor)) turma.SenhaProfessor = dto.SenhaProfessor.Trim();
+
+        await _db.SaveChangesAsync();
+        return Ok(turma);
+    }
+
+    /// <summary>
+    /// Exclusão de Turma/Sala e seus respectivos alunos
+    /// </summary>
+    [HttpDelete("turmas/{turmaId:guid}")]
+    public async Task<IActionResult> ExcluirTurma(Guid turmaId)
+    {
+        var turma = await _db.Turmas
+            .Include(t => t.Alunos)
+                .ThenInclude(a => a.Progressos)
+            .FirstOrDefaultAsync(t => t.Id == turmaId);
+
+        if (turma == null) return NotFound("Turma/Sala não encontrada.");
+
+        foreach (var aluno in turma.Alunos)
+        {
+            _db.ProgressoFases.RemoveRange(aluno.Progressos);
+        }
+        _db.Alunos.RemoveRange(turma.Alunos);
+        _db.Turmas.Remove(turma);
+
+        await _db.SaveChangesAsync();
+        return Ok(new { mensagem = $"Turma/Sala '{turma.Nome}' excluída com sucesso." });
     }
 
     [HttpPost("alunos")]

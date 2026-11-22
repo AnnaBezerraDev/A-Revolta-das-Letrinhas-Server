@@ -4,6 +4,16 @@ public class CriarMunicipioDto
 {
     public string Nome { get; set; } = string.Empty;
     public string UF { get; set; } = "SP";
+    public DateTime? DataExpiracaoContrato { get; set; }
+    public string? NumeroConvenio { get; set; }
+}
+
+public class AtualizarMunicipioDto
+{
+    public string? Nome { get; set; }
+    public string? UF { get; set; }
+    public DateTime? DataExpiracaoContrato { get; set; }
+    public string? NumeroConvenio { get; set; }
 }
 
 public class CriarEscolaDto
@@ -19,6 +29,18 @@ public class CriarTurmaDto
     public Guid EscolaId { get; set; }
     public string Nome { get; set; } = string.Empty;
     public int AnoLetivo { get; set; } = DateTime.UtcNow.Year;
+    public string? NomeProfessor { get; set; }
+    public string? LoginProfessor { get; set; }
+    public string? SenhaProfessor { get; set; }
+}
+
+public class AtualizarTurmaDto
+{
+    public string? Nome { get; set; }
+    public int? AnoLetivo { get; set; }
+    public string? NomeProfessor { get; set; }
+    public string? LoginProfessor { get; set; }
+    public string? SenhaProfessor { get; set; }
 }
 
 public class CadastrarAlunoAdminDto
@@ -33,13 +55,15 @@ public class ResumoSalaDto
     public Guid TurmaId { get; set; }
     public string NomeTurma { get; set; } = string.Empty;
     public int AnoLetivo { get; set; }
+    public string? NomeProfessor { get; set; }
+    public string? LoginProfessor { get; set; }
     public int TotalAlunos { get; set; }
     public int TotalFasesConcluidas { get; set; }
     public double MediaFasesPorAluno { get; set; }
     public double MediaEstrelas { get; set; }
     public int TotalErros { get; set; }
-    public double TaxaConclusaoPort { get; set; } // % do total possível (30 fases)
-    public double TaxaConclusaoMath { get; set; } // % do total possível (30 fases)
+    public double TaxaConclusaoPort { get; set; }
+    public double TaxaConclusaoMath { get; set; }
     public List<AlunoSalaDetalheDto> Alunos { get; set; } = new();
 }
 
@@ -54,5 +78,5 @@ public class AlunoSalaDetalheDto
     public int PontuacaoTotal { get; set; }
     public double MediaEstrelas { get; set; }
     public int ErrosTotais { get; set; }
-    public string StatusDesempenho { get; set; } = "Regular"; // "Excelente", "Bom", "Precisa de Apoio"
+    public string StatusDesempenho { get; set; } = "Regular";
 }
