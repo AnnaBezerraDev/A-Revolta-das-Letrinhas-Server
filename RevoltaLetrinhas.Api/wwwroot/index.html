@@ -584,6 +584,9 @@
             </div>
 
             <div class="prof-tag">${profInfo}</div>
+            <button class="btn btn-sm" style="background:#4F46E5; color:white; width:100%; margin-bottom:10px; font-size:12px; padding:5px 8px; border-radius:6px;" onclick="abrirModalProfessor('${sala.turmaId}', '${sala.nomeTurma}', '${sala.nomeProfessor || ''}', '${sala.loginProfessor || ''}')">
+              ✏️ Definir / Alterar Professor e Senha
+            </button>
 
             <div style="font-size:13px; font-weight:700; margin-bottom:10px; color:#4338CA;">
               🎒 ${sala.totalAlunos} Alunos Cadastrados
@@ -832,7 +835,75 @@
       recarregarDados();
     }
 
+    function abrirModalProfessor(turmaId, turmaNome, profNome, profLogin) {
+      document.getElementById('modalProfTurmaId').value = turmaId;
+      document.getElementById('modalProfTurmaNome').innerText = turmaNome;
+      document.getElementById('modalProfNome').value = profNome || '';
+      document.getElementById('modalProfLogin').value = profLogin || '';
+      document.getElementById('modalProfSenha').value = '';
+      const m = document.getElementById('modalProfessor');
+      m.style.display = 'flex';
+    }
+
+    function fecharModalProfessor() {
+      document.getElementById('modalProfessor').style.display = 'none';
+    }
+
+    async function salvarProfessorSala() {
+      const turmaId = document.getElementById('modalProfTurmaId').value;
+      const nomeProfessor = document.getElementById('modalProfNome').value.trim();
+      const loginProfessor = document.getElementById('modalProfLogin').value.trim();
+      const senhaProfessor = document.getElementById('modalProfSenha').value.trim();
+
+      if (!loginProfessor || !senhaProfessor) {
+        return alert("Preencha o Usuário de Acesso e a Senha para o Professor!");
+      }
+
+      try {
+        const res = await fetch(`/api/admin/turmas/${turmaId}/professor`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nomeProfessor, loginProfessor, senhaProfessor })
+        });
+
+        if (res.ok) {
+          alert("Credenciais do Professor salvas com sucesso!");
+          fecharModalProfessor();
+          carregarSalasEscola(escolaAtualId);
+          recarregarDados();
+        } else {
+          alert("Erro ao salvar dados do professor.");
+        }
+      } catch (e) {
+        alert("Erro na requisição: " + e);
+      }
+    }
+
     window.onload = recarregarDados;
   </script>
+
+  <!-- MODAL EDITAR PROFESSOR DA SALA -->
+  <div id="modalProfessor" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; width:450px; max-width:90%; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <h3 style="margin-top:0; color:#1E293B;">👨‍🏫 Professor da Turma <span id="modalProfTurmaNome" style="color:#4F46E5;"></span></h3>
+      <input type="hidden" id="modalProfTurmaId">
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Nome do Professor(a):</label>
+        <input type="text" id="modalProfNome" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Ex: Professora Mariana">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Usuário de Acesso no Jogo:</label>
+        <input type="text" id="modalProfLogin" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Ex: prof.mariana">
+      </div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Senha de Acesso no Jogo:</label>
+        <input type="text" id="modalProfSenha" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Digite a senha (ex: 1234)">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-secondary" style="background:#E2E8F0; color:#334155; padding:8px 16px; border-radius:6px;" onclick="fecharModalProfessor()">Cancelar</button>
+        <button class="btn btn-success" style="background:#16A34A; color:white; padding:8px 16px; border-radius:6px;" onclick="salvarProfessorSala()">Salvar Credenciais</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
