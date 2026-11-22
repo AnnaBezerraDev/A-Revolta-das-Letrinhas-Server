@@ -1,0 +1,61 @@
+namespace RevoltaLetrinhas.Api.DTOs;
+
+public class RegistrarProgressoDto
+{
+    public Guid AlunoId { get; set; }
+    public string Materia { get; set; } = "Portugues"; // "Portugues" ou "Matematica"
+    public string Nivel { get; set; } = "Facil";       // "Facil", "Medio", "Dificil"
+    public int NumeroFase { get; set; }               // 1 a 30
+    public bool Concluida { get; set; }
+    public int Estrelas { get; set; }                 // 1 a 3
+    public int Pontuacao { get; set; }
+    public int QuantidadeErros { get; set; }
+    public int TempoGastoSegundos { get; set; }
+}
+
+public class CriarAlunoDto
+{
+    public Guid TurmaId { get; set; }
+    public string NomeCompleto { get; set; } = string.Empty;
+    public string? NomeJogo { get; set; }
+}
+
+public class ExcluirAlunoDto
+{
+    public string NomeAluno { get; set; } = string.Empty;
+}
+
+public class AlunoResumoDto
+{
+    public Guid Id { get; set; }
+    public string NomeCompleto { get; set; } = string.Empty;
+    public string NomeJogo { get; set; } = string.Empty;
+    public Guid TurmaId { get; set; }
+    public string TurmaNome { get; set; } = string.Empty;
+}
+
+public class TurmaComAlunosDto
+{
+    public Guid TurmaId { get; set; }
+    public string Nome { get; set; } = string.Empty;
+    public List<AlunoResumoDto> Alunos { get; set; } = new();
+}
+
+public class InfoEscolaDto
+{
+    public Guid EscolaId { get; set; }
+    public string NomeEscola { get; set; } = string.Empty;
+    public string Municipio { get; set; } = string.Empty;
+    public string UF { get; set; } = string.Empty;
+    public string TokenAcesso { get; set; } = string.Empty;
+    public List<TurmaComAlunosDto> Turmas { get; set; } = new();
+}
+
+public class EscolaDisponivelDto
+{
+    public string Token { get; set; } = string.Empty;
+    public string Nome { get; set; } = string.Empty;
+    public string Municipio { get; set; } = string.Empty;
+    public string UF { get; set; } = string.Empty;
+    public int TotalAlunos { get; set; }
+}
