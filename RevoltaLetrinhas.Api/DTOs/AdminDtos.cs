@@ -22,6 +22,24 @@ public class CriarEscolaDto
     public string Nome { get; set; } = string.Empty;
     public string? CodigoInep { get; set; }
     public string? TokenAcesso { get; set; }
+    public int? LimiteAlunos { get; set; }
+    public int? LimiteProfessores { get; set; }
+    public int? LimiteMaquinas { get; set; }
+}
+
+public class AtualizarLicencaEscolaDto
+{
+    /// <summary>null = sem limite</summary>
+    public int? LimiteAlunos { get; set; }
+    /// <summary>null = sem limite</summary>
+    public int? LimiteProfessores { get; set; }
+    public int LimiteMaquinas { get; set; } = 100;
+    public bool Ativa { get; set; } = true;
+}
+
+public class BloqueioMaquinaDto
+{
+    public bool Bloqueada { get; set; }
 }
 
 public class CriarTurmaDto

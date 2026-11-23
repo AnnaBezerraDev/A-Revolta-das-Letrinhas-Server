@@ -72,6 +72,27 @@ Backup completo de antes das mudanças: `Downloads\Backup_RevoltaLetrinhas_2026-
 `/api/jogo/salas-resumo` traz professor e última atividade; `/api/jogo/progresso-aluno/{id}` traz o detalhe fase
 a fase; `/api/jogo/versao` = 1.0.3 (código 103) com o patch novo em `wwwroot/patch/`.
 
+## Versão 1.0.4 — licença por escola
+
+**Como funciona**
+- **Computadores ao mesmo tempo:** cada computador tem uma identidade (do hardware) e avisa o servidor a cada
+  minuto (`POST /api/jogo/maquina/sinal`). Conta como "em uso" quem mandou sinal nos últimos 3 minutos.
+  Passou do limite da escola (padrão 100), o computador novo vê "Limite de computadores atingido" e tenta de novo
+  a cada 30 s. Ao sair pelo botão do jogo, a vaga é liberada na hora (`/maquina/encerrar`).
+  No painel: **Computadores** lista cada PC (em uso, parado, recusado por limite) e permite **bloquear** ou remover.
+- **Alunos e professores:** `LimiteAlunos` e `LimiteProfessores` por escola (vazio = sem limite). Cadastro acima do
+  limite é recusado (jogo e painel); no jogo, o aluno não é criado e aparece "X de Y vagas" na lista.
+- **Vencimento:** usa a validade do contrato da prefeitura (vale até o fim do dia). Vencido — ou escola desativada —
+  todas as rotas do jogo respondem 403 e o jogo mostra a tela de bloqueio. Renovando a data, volta sozinho.
+- **Sem internet:** o jogo usa a última verificação por até **7 dias**; depois exige conexão.
+- **Banco:** `Data/AtualizacaoEsquema.cs` cria as colunas/tabela novas em bancos que já existem (se falhar, o servidor
+  não inicia e o Render mantém a versão anterior).
+- **Segurança:** removida a rota `/api/jogo/escolas-disponiveis`, que devolvia o token de TODAS as escolas.
+
+**Limitações conhecidas:** jogos com versão anterior à 1.0.4 não mandam sinal (não entram na contagem de
+computadores) até receberem o patch; a regra roda no computador, então um jogo adulterado poderia ignorá-la
+(o servidor continua recusando os dados de escolas vencidas).
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra

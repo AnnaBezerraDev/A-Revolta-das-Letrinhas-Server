@@ -28,5 +28,18 @@ public class Escola
 
     public DateTime DataCriacao { get; set; } = DateTime.UtcNow;
 
+    // ===== Licença =====
+
+    /// <summary>Máximo de alunos cadastrados na escola (null = sem limite).</summary>
+    public int? LimiteAlunos { get; set; }
+
+    /// <summary>Máximo de professores com login (null = sem limite).</summary>
+    public int? LimiteProfessores { get; set; }
+
+    /// <summary>Máximo de computadores usando o jogo ao mesmo tempo.</summary>
+    public int LimiteMaquinas { get; set; } = 100;
+
     public List<Turma> Turmas { get; set; } = new();
+
+    public List<Maquina> Maquinas { get; set; } = new();
 }

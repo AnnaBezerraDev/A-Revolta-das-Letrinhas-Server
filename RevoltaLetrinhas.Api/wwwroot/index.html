@@ -361,6 +361,18 @@
               <label>Token de Acesso do Jogo (.exe):</label>
               <input type="text" id="cadEscolaToken" placeholder="Ex: ESC-PAULO-01">
             </div>
+            <div class="form-group">
+              <label>Limite de alunos (vazio = sem limite):</label>
+              <input type="number" min="1" id="cadEscolaLimAlunos" placeholder="Ex: 350">
+            </div>
+            <div class="form-group">
+              <label>Limite de professores (vazio = sem limite):</label>
+              <input type="number" min="1" id="cadEscolaLimProf" placeholder="Ex: 15">
+            </div>
+            <div class="form-group">
+              <label>Computadores usando ao mesmo tempo:</label>
+              <input type="number" min="1" id="cadEscolaLimMaq" value="100">
+            </div>
             <button class="btn btn-sm" onclick="cadastrarEscola()">Salvar Escola 💾</button>
           </div>
 
@@ -507,7 +519,157 @@
     }
 
     function algumModalAberto() {
-      return document.getElementById('modalProfessor').style.display === 'flex';
+      return ['modalProfessor', 'modalLicenca', 'modalMaquinas', 'modalContrato']
+        .some(id => document.getElementById(id) && document.getElementById(id).style.display === 'flex');
+    }
+
+    /* ===== LICENÇA, COMPUTADORES E CONTRATO ===== */
+    let licencaAtual = null;
+
+    function numeroOuNulo(idCampo) {
+      const v = (document.getElementById(idCampo).value || '').trim();
+      if (v === '') return null;
+      const n = parseInt(v, 10);
+      return isNaN(n) || n <= 0 ? null : n;
+    }
+
+    /** Data do contrato (dia) sem erro de fuso: usa só o AAAA-MM-DD que veio do servidor */
+    function dataContrato(iso) {
+      if (!iso) return '-';
+      const [a, m, d] = String(iso).slice(0, 10).split('-');
+      return `${d}/${m}/${a}`;
+    }
+
+    /** Data e hora vindas do servidor em UTC (com ou sem "Z") no horário local */
+    function dataHora(iso) {
+      if (!iso) return '-';
+      const s = /[zZ]|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z';
+      return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    function abrirModal(id) { document.getElementById(id).style.display = 'flex'; }
+    function fecharModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    function abrirModalLicenca() {
+      if (!escolaAtualId || !licencaAtual) return;
+      const escola = dadosGerais.escolas.find(e => e.id === escolaAtualId);
+      document.getElementById('licNomeEscola').innerText = escola ? escola.nome : '';
+      document.getElementById('licAlunos').value = licencaAtual.limiteAlunos ?? '';
+      document.getElementById('licProfessores').value = licencaAtual.limiteProfessores ?? '';
+      document.getElementById('licMaquinas').value = licencaAtual.limiteMaquinas ?? 100;
+      document.getElementById('licAtiva').checked = licencaAtual.ativa !== false;
+      document.getElementById('licAviso').innerText = '';
+      abrirModal('modalLicenca');
+    }
+
+    async function salvarLicenca() {
+      const limiteMaquinas = numeroOuNulo('licMaquinas');
+      if (!limiteMaquinas) return alert('Informe quantos computadores podem usar o jogo ao mesmo tempo (1 ou mais).');
+      const ativa = document.getElementById('licAtiva').checked;
+      if (!ativa && !confirm('Desativar a escola bloqueia o jogo em TODOS os computadores dela. Continuar?')) return;
+      try {
+        const r = await enviarJson(`/api/admin/escolas/${escolaAtualId}/licenca`, 'PUT', {
+          limiteAlunos: numeroOuNulo('licAlunos'),
+          limiteProfessores: numeroOuNulo('licProfessores'),
+          limiteMaquinas,
+          ativa
+        });
+        fecharModal('modalLicenca');
+        alert('Licença da escola salva!' + (r.avisos && r.avisos.length ? '\n\n⚠️ ' + r.avisos.join('\n⚠️ ') : ''));
+        recarregarDados();
+      } catch (err) {
+        alert('Não foi possível salvar a licença: ' + err.message);
+      }
+    }
+
+    function abrirModalMaquinas() {
+      if (!escolaAtualId) return;
+      const escola = dadosGerais.escolas.find(e => e.id === escolaAtualId);
+      document.getElementById('maqNomeEscola').innerText = escola ? escola.nome : '';
+      abrirModal('modalMaquinas');
+      carregarMaquinas();
+    }
+
+    async function carregarMaquinas() {
+      const tbody = document.getElementById('tabelaMaquinas');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>';
+      try {
+        const d = await api(`/api/admin/escolas/${escolaAtualId}/maquinas`);
+        document.getElementById('maqResumo').innerText = `${d.emUso} de ${d.limiteMaquinas} computadores usando o jogo agora · ${d.maquinas.length} já usaram este token`;
+        if (!d.maquinas.length) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Nenhum computador abriu o jogo com este token ainda.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = '';
+        d.maquinas.forEach(m => {
+          const situacao = m.bloqueada
+            ? '<span class="badge badge-status-apoio">Bloqueado</span>'
+            : (m.emUso ? '<span class="badge badge-status-excelente">Em uso</span>' : '<span class="badge" style="background:#E2E8F0;color:#475569;">Parado</span>');
+          const recusa = m.ultimaRecusa ? `<br><small style="color:#B45309;">recusado por limite em ${dataHora(m.ultimaRecusa)}</small>` : '';
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><strong>${esc(m.nome || 'Sem nome')}</strong><br><small style="color:#64748B;">${esc(m.identificador)}</small></td>
+            <td>${esc(m.versaoJogo || '-')}</td>
+            <td>${situacao}</td>
+            <td>${dataHora(m.ultimoSinal)}${recusa}</td>
+            <td>${dataHora(m.primeiroAcesso)}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn btn-sm ${m.bloqueada ? 'btn-success' : 'btn-danger'}" onclick="bloquearMaquina(${arg(m.id)}, ${!m.bloqueada})">${m.bloqueada ? '✅ Liberar' : '⛔ Bloquear'}</button>
+              <button class="btn btn-sm" style="background:#E2E8F0;color:#334155;" onclick="removerMaquina(${arg(m.id)}, ${arg(m.nome || '')})">Remover</button>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:red;">Erro ao carregar: ${esc(err.message)}</td></tr>`;
+      }
+    }
+
+    async function bloquearMaquina(id, bloquear) {
+      if (bloquear && !confirm('Bloquear este computador? Ele não conseguirá mais usar o jogo com o token desta escola.')) return;
+      try {
+        await enviarJson(`/api/admin/maquinas/${id}/bloqueio`, 'PUT', { bloqueada: bloquear });
+        carregarMaquinas();
+        recarregarDados(true);
+      } catch (err) {
+        alert('Erro: ' + err.message);
+      }
+    }
+
+    async function removerMaquina(id, nome) {
+      if (!confirm(`Remover "${nome}" da lista? Se o jogo for aberto nele de novo, ele volta a aparecer.`)) return;
+      try {
+        await api(`/api/admin/maquinas/${id}`, { method: 'DELETE' });
+        carregarMaquinas();
+        recarregarDados(true);
+      } catch (err) {
+        alert('Erro: ' + err.message);
+      }
+    }
+
+    function abrirModalContrato(id, nome, data, convenio) {
+      document.getElementById('contratoMunId').value = id;
+      document.getElementById('contratoMunNome').innerText = nome;
+      document.getElementById('contratoData').value = data || '';
+      document.getElementById('contratoConvenio').value = convenio || '';
+      abrirModal('modalContrato');
+    }
+
+    async function salvarContrato() {
+      const id = document.getElementById('contratoMunId').value;
+      const data = document.getElementById('contratoData').value;
+      const convenio = document.getElementById('contratoConvenio').value.trim();
+      if (!data) return alert('Informe a data de validade do contrato.');
+      try {
+        await enviarJson(`/api/admin/municipios/${id}/contrato`, 'PUT', {
+          dataExpiracaoContrato: data + 'T00:00:00Z',
+          numeroConvenio: convenio || null
+        });
+        fecharModal('modalContrato');
+        alert('Contrato atualizado! Se estava vencido, o jogo volta a funcionar nas escolas desta prefeitura.');
+        recarregarDados();
+      } catch (err) {
+        alert('Não foi possível salvar o contrato: ' + err.message);
+      }
     }
 
     // Atualiza sozinho a cada 30s (somente na aba de salas, com a janela visível e sem modal aberto)
@@ -572,10 +734,9 @@
         let dataStr = '-';
 
         if (m.dataExpiracaoContrato) {
-          const d = new Date(m.dataExpiracaoContrato);
-          dataStr = d.toLocaleDateString('pt-BR');
-          if (m.diasRestantes < 0) {
-            statusBadge = `<span class="badge-exp-danger">CONTRATO EXPIRADO (${Math.abs(m.diasRestantes)} dias atrás) 🚫</span>`;
+          dataStr = dataContrato(m.dataExpiracaoContrato);
+          if (m.vencido) {
+            statusBadge = `<span class="badge-exp-danger">VENCIDO: JOGO BLOQUEADO 🚫</span>`;
           } else if (m.diasRestantes <= 30) {
             statusBadge = `<span class="badge-exp-warning">EXPIRA EM ${m.diasRestantes} DIAS ⚠️</span>`;
           } else {
@@ -592,6 +753,7 @@
           <td>${dataStr}</td>
           <td>${statusBadge}</td>
           <td>
+            <button class="btn btn-sm" onclick="abrirModalContrato(${arg(m.id)}, ${arg(m.nome)}, ${arg((m.dataExpiracaoContrato || '').slice(0, 10))}, ${arg(m.numeroConvenio || '')})">📅 Editar contrato</button>
             <button class="btn btn-sm btn-danger" onclick="excluirMunicipio(${arg(m.id)}, ${arg(m.nome)})">🗑️ Excluir</button>
           </td>
         `;
@@ -608,7 +770,8 @@
       dadosGerais.escolas.forEach(e => {
         const opt = document.createElement('option');
         opt.value = e.id;
-        opt.innerText = `${e.nome} (${e.municipio})`;
+        const situacao = e.licencaValida ? '' : (e.licencaCodigo === 'contrato_vencido' ? ' - CONTRATO VENCIDO' : ' - DESATIVADA');
+        opt.innerText = `${e.nome} (${e.municipio})${situacao}`;
         selFiltro.appendChild(opt);
 
         const opt2 = opt.cloneNode(true);
@@ -644,29 +807,33 @@
         const data = await api(`/api/admin/escola/${escolaId}/salas-resumo`);
         salasDaEscolaAtual = data.salas || [];
 
-        // Atualiza o Banner de Expiração da Prefeitura
+        // Quadro da escola: contrato da prefeitura + licença (limites e computadores em uso)
+        licencaAtual = data.licenca;
         const banner = document.getElementById('bannerPrefeitura');
-        if (data.dataExpiracao) {
-          const dExp = new Date(data.dataExpiracao);
-          const diffDays = Math.ceil((dExp - new Date()) / (1000 * 60 * 60 * 24));
-          banner.style.display = 'flex';
-          banner.innerHTML = `
-            <div>
-              <strong>🏛️ Prefeitura / Convênio:</strong> ${esc(data.municipio)} |
-              <strong>Validade do Contrato:</strong> ${dExp.toLocaleDateString('pt-BR')}
-              (${diffDays >= 0 ? `<span class="badge-exp-ok">${diffDays} dias restantes</span>` : `<span class="badge-exp-danger">EXPIRADO</span>`})
-            </div>
-            <div>
-              Token da Escola no Jogo: <span class="badge badge-token">${esc(data.tokenAcesso)}</span>
-            </div>
-          `;
-        } else {
-          banner.style.display = 'flex';
-          banner.innerHTML = `
-            <div><strong>🏛️ Município:</strong> ${esc(data.municipio)} (Sem data de expiração cadastrada)</div>
-            <div>Token da Escola: <span class="badge badge-token">${esc(data.tokenAcesso)}</span></div>
-          `;
-        }
+        const L = data.licenca || {};
+        const validade = data.dataExpiracao
+          ? `${dataContrato(data.dataExpiracao)} ${L.valida ? `<span class="badge-exp-ok">${L.diasRestantes} dias restantes</span>` : ''}`
+          : 'sem data cadastrada';
+        const situacao = L.valida
+          ? '<span class="badge-exp-ok">LICENÇA ATIVA</span>'
+          : `<span class="badge-exp-danger">${L.codigo === 'contrato_vencido' ? 'CONTRATO VENCIDO' : 'ESCOLA DESATIVADA'}: JOGO BLOQUEADO</span>`;
+        const limite = (atual, max) => max == null ? `${atual} <small>(sem limite)</small>` : `${atual} / ${max}`;
+        banner.style.display = 'flex';
+        banner.style.flexWrap = 'wrap';
+        banner.style.gap = '10px';
+        banner.innerHTML = `
+          <div style="flex:1 1 420px;">
+            <strong>🏛️ Prefeitura:</strong> ${esc(data.municipio)} · <strong>Contrato:</strong> ${validade}<br>
+            <strong>Token da escola:</strong> <span class="badge badge-token">${esc(data.tokenAcesso)}</span> ${situacao}
+          </div>
+          <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+            <span>🎒 Alunos: <strong>${limite(L.totalAlunos, L.limiteAlunos)}</strong></span>
+            <span>👨‍🏫 Professores: <strong>${limite(L.totalProfessores, L.limiteProfessores)}</strong></span>
+            <span>💻 Computadores em uso: <strong>${L.maquinasEmUso} / ${L.limiteMaquinas}</strong></span>
+            <button class="btn btn-sm" onclick="abrirModalLicenca()">⚙️ Licença da escola</button>
+            <button class="btn btn-sm" onclick="abrirModalMaquinas()">💻 Computadores</button>
+          </div>
+        `;
 
         // Preenche o select de turmas para cadastro de aluno (mantendo a escolha atual)
         const selAlunoTurma = document.getElementById('cadAlunoTurma');
@@ -888,9 +1055,17 @@
       if (!nome) return alert("Digite o nome da escola.");
 
       try {
-        const escola = await enviarJson('/api/admin/escolas', 'POST', { municipioId, nome, tokenAcesso: tokenAcesso || null });
+        const escola = await enviarJson('/api/admin/escolas', 'POST', {
+          municipioId, nome, tokenAcesso: tokenAcesso || null,
+          limiteAlunos: numeroOuNulo('cadEscolaLimAlunos'),
+          limiteProfessores: numeroOuNulo('cadEscolaLimProf'),
+          limiteMaquinas: numeroOuNulo('cadEscolaLimMaq') || 100
+        });
         document.getElementById('cadEscolaNome').value = '';
         document.getElementById('cadEscolaToken').value = '';
+        document.getElementById('cadEscolaLimAlunos').value = '';
+        document.getElementById('cadEscolaLimProf').value = '';
+        document.getElementById('cadEscolaLimMaq').value = '100';
         alert(`Escola salva!\nToken para colocar no config_escola.json do jogo: ${escola.tokenAcesso}`);
         escolaAtualId = escola.id;
         salaSelecionadaId = null;
@@ -989,6 +1164,74 @@
       recarregarDados();
     };
   </script>
+
+  <!-- MODAL LICENÇA DA ESCOLA -->
+  <div id="modalLicenca" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; width:480px; max-width:92%; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <h3 style="margin-top:0; color:#1E293B;">⚙️ Licença da escola <span id="licNomeEscola" style="color:#4F46E5;"></span></h3>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Limite de alunos (vazio = sem limite):</label>
+        <input type="number" min="1" id="licAlunos" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Ex: 350">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Limite de professores com login (vazio = sem limite):</label>
+        <input type="number" min="1" id="licProfessores" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Ex: 15">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Computadores usando o jogo ao mesmo tempo:</label>
+        <input type="number" min="1" id="licMaquinas" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" value="100">
+      </div>
+      <label style="display:flex; gap:8px; align-items:center; margin-bottom:8px; font-weight:600; color:#334155;">
+        <input type="checkbox" id="licAtiva" checked> Escola ativa (desmarcado = jogo bloqueado em todos os computadores)
+      </label>
+      <p style="font-size:12px; color:#64748B; margin:0 0 16px;">A validade vem do contrato da prefeitura (aba "Contratos com Prefeituras").</p>
+      <div id="licAviso" style="font-size:13px; color:#B45309; margin-bottom:8px;"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn" style="background:#E2E8F0; color:#334155; padding:8px 16px; border-radius:6px;" onclick="fecharModal('modalLicenca')">Cancelar</button>
+        <button class="btn btn-success" style="padding:8px 16px; border-radius:6px;" onclick="salvarLicenca()">Salvar licença</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL COMPUTADORES DA ESCOLA -->
+  <div id="modalMaquinas" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; width:980px; max-width:95%; max-height:88vh; overflow:auto; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <h3 style="margin:0; color:#1E293B;">💻 Computadores da escola <span id="maqNomeEscola" style="color:#4F46E5;"></span></h3>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-sm" onclick="carregarMaquinas()">Atualizar 🔄</button>
+          <button class="btn btn-sm" style="background:#E2E8F0; color:#334155;" onclick="fecharModal('modalMaquinas')">Fechar</button>
+        </div>
+      </div>
+      <p id="maqResumo" style="color:#475569; margin:10px 0 14px; font-weight:600;"></p>
+      <p style="font-size:12px; color:#64748B; margin:-6px 0 12px;">"Em uso" = o jogo está aberto e mandou sinal nos últimos 3 minutos. Ao fechar o jogo, a vaga é liberada.</p>
+      <table>
+        <thead><tr><th>Computador</th><th>Versão</th><th>Situação</th><th>Último sinal</th><th>Primeiro acesso</th><th>Ações</th></tr></thead>
+        <tbody id="tabelaMaquinas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- MODAL CONTRATO DA PREFEITURA -->
+  <div id="modalContrato" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; width:440px; max-width:92%; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <h3 style="margin-top:0; color:#1E293B;">📅 Contrato de <span id="contratoMunNome" style="color:#4F46E5;"></span></h3>
+      <input type="hidden" id="contratoMunId">
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Válido até (inclusive):</label>
+        <input type="date" id="contratoData" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;">
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Nº do convênio / processo:</label>
+        <input type="text" id="contratoConvenio" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Ex: CONV-2026/041">
+      </div>
+      <p style="font-size:12px; color:#64748B; margin:0 0 16px;">Depois dessa data, o jogo fica bloqueado em todas as escolas desta prefeitura até a renovação.</p>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn" style="background:#E2E8F0; color:#334155; padding:8px 16px; border-radius:6px;" onclick="fecharModal('modalContrato')">Cancelar</button>
+        <button class="btn btn-success" style="padding:8px 16px; border-radius:6px;" onclick="salvarContrato()">Salvar contrato</button>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL EDITAR PROFESSOR DA SALA -->
   <div id="modalProfessor" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">

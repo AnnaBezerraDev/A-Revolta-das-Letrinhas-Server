@@ -38,6 +38,9 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
+    // Bancos que já existiam ganham as colunas/tabelas novas (se falhar, o servidor não inicia)
+    AtualizacaoEsquema.Aplicar(db, app.Logger);
+
     // Dados de demonstração SOMENTE no ambiente de desenvolvimento (servidor local).
     // Em produção eles misturavam escolas fictícias com as escolas reais.
     if (app.Environment.IsDevelopment() && !db.Escolas.Any())

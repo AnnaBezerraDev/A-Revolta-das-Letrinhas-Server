@@ -68,9 +68,32 @@ public class JogoController : ControllerBase
 
     private Task<Escola?> BuscarEscolaComAlunos(string token) =>
         _db.Escolas
+            .Include(e => e.Municipio)
             .Include(e => e.Turmas)
                 .ThenInclude(t => t.Alunos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == token && e.Ativa);
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == token);
+
+    /// <summary>403 com o motivo, se a licença da escola não permite usar o jogo (escola inativa ou contrato vencido).</summary>
+    private IActionResult? BloqueioLicenca(Escola escola)
+    {
+        var status = Licenca.Avaliar(escola);
+        return status.Valida ? null : StatusCode(StatusCodes.Status403Forbidden, Licenca.Resposta(status));
+    }
+
+    /// <summary>409 se a escola já tem o máximo de alunos da licença.</summary>
+    private IActionResult? BloqueioLimiteAlunos(Escola escola)
+    {
+        if (!escola.LimiteAlunos.HasValue) return null;
+        int ativos = escola.Turmas.SelectMany(t => t.Alunos).Count(a => a.Ativo);
+        if (ativos < escola.LimiteAlunos.Value) return null;
+        return StatusCode(StatusCodes.Status409Conflict, new
+        {
+            codigo = "limite_alunos",
+            erro = $"A escola atingiu o limite de {escola.LimiteAlunos.Value} alunos da licença. Para cadastrar mais alunos, fale com a coordenação.",
+            limiteAlunos = escola.LimiteAlunos.Value,
+            totalAlunos = ativos
+        });
+    }
 
     private static AlunoResumoDto ParaResumo(Aluno aluno, Turma turma) => new()
     {
@@ -100,13 +123,13 @@ public class JogoController : ControllerBase
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
             // (e o versaoLocalCodigo do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.3",
-            versaoCodigo = 103,
+            versao = "1.0.4",
+            versaoCodigo = 104,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Sincronização com o servidor sem perda de dados, salas iguais às do painel, desempenho real das fases e nova Área do Professor com visão da sala e de cada aluno."
+            novidades = "Licença por escola: limite de computadores usando o jogo ao mesmo tempo, limite de alunos e bloqueio automático quando o contrato da prefeitura vence."
         });
     }
 
@@ -147,32 +170,6 @@ public class JogoController : ControllerBase
     // =====================================================================
 
     /// <summary>
-    /// Retorna todas as escolas cadastradas para que o professor possa selecionar no jogo se necessário.
-    /// </summary>
-    [HttpGet("escolas-disponiveis")]
-    public async Task<IActionResult> ListarEscolasDisponiveis()
-    {
-        var escolas = await _db.Escolas
-            .Include(e => e.Municipio)
-            .Include(e => e.Turmas)
-                .ThenInclude(t => t.Alunos)
-            .Where(e => e.Ativa)
-            .OrderBy(e => e.Nome)
-            .Select(e => new EscolaDisponivelDto
-            {
-                Token = e.TokenAcesso,
-                Nome = e.Nome,
-                Municipio = e.Municipio != null ? e.Municipio.Nome : "Geral",
-                UF = e.Municipio != null ? e.Municipio.UF : "SP",
-                DataExpiracaoContrato = e.Municipio != null ? e.Municipio.DataExpiracaoContrato : null,
-                TotalAlunos = e.Turmas.SelectMany(t => t.Alunos).Count()
-            })
-            .ToListAsync();
-
-        return Ok(escolas);
-    }
-
-    /// <summary>
     /// Chamado pelo jogo .exe ao iniciar no laboratório para identificar a escola e listar APENAS as turmas/alunos DESTA escola.
     /// </summary>
     [HttpGet("conectar")]
@@ -188,18 +185,18 @@ public class JogoController : ControllerBase
             .Include(e => e.Municipio)
             .Include(e => e.Turmas)
                 .ThenInclude(t => t.Alunos.Where(a => a.Ativo))
-            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
 
         if (escola == null)
         {
-            return NotFound(new { erro = $"Escola com token '{tokenEfetivo}' não encontrada ou inativa." });
+            return NotFound(new { codigo = "escola_nao_encontrada", erro = $"Escola com token '{tokenEfetivo}' não encontrada." });
         }
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
-        DateTime? expContrato = escola.Municipio?.DataExpiracaoContrato;
-        int? diasRestantes = expContrato.HasValue
-            ? (int)Math.Ceiling((expContrato.Value - DateTime.UtcNow).TotalDays)
-            : null;
-        bool contratoValido = !diasRestantes.HasValue || diasRestantes.Value >= 0;
+        var licenca = Licenca.Avaliar(escola);
+        DateTime? expContrato = licenca.DataExpiracao;
+        int? diasRestantes = licenca.DiasRestantes;
+        bool contratoValido = licenca.Valida;
 
         var info = new InfoEscolaDto
         {
@@ -212,6 +209,10 @@ public class JogoController : ControllerBase
             DiasRestantesContrato = diasRestantes,
             ContratoValido = contratoValido,
             TokenAcesso = escola.TokenAcesso,
+            TemLimiteAlunos = escola.LimiteAlunos.HasValue,
+            LimiteAlunos = escola.LimiteAlunos ?? 0,
+            TotalAlunos = escola.Turmas.Sum(t => t.Alunos.Count),
+            LimiteMaquinas = escola.LimiteMaquinas,
             Turmas = escola.Turmas.OrderBy(t => t.Nome).Select(t => new TurmaComAlunosDto
             {
                 TurmaId = t.Id,
@@ -246,6 +247,7 @@ public class JogoController : ControllerBase
 
         var escola = await BuscarEscolaComAlunos(tokenEfetivo);
         if (escola == null) return NotFound("Escola não encontrada.");
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
         string user = (dto.Login ?? "").Trim().ToLower();
         string pass = (dto.Senha ?? "").Trim();
@@ -305,6 +307,7 @@ public class JogoController : ControllerBase
         {
             var escola = await BuscarEscolaComAlunos(tokenEfetivo);
             if (escola == null) return Unauthorized("Token da escola inválido.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
             bool jaExistia = escola.Turmas.Any(t => MesmoNome(t.Nome, dto.NomeTurma));
             var turma = ObterOuCriarTurma(escola, dto.NomeTurma);
@@ -339,6 +342,7 @@ public class JogoController : ControllerBase
         {
             var escola = await BuscarEscolaComAlunos(tokenEfetivo);
             if (escola == null) return Unauthorized("Token da escola inválido.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
             string nomeJogo = string.IsNullOrWhiteSpace(dto.NomeJogo) ? dto.NomeCompleto.Trim() : dto.NomeJogo.Trim();
 
@@ -348,6 +352,7 @@ public class JogoController : ControllerBase
             {
                 if (!existente.Ativo)
                 {
+                    if (BloqueioLimiteAlunos(escola) is IActionResult limite) return limite;
                     existente.Ativo = true;
                     await _db.SaveChangesAsync();
                 }
@@ -355,7 +360,10 @@ public class JogoController : ControllerBase
                 return Ok(ParaResumo(existente, turmaExistente));
             }
 
-            // 2. Descobre a turma: por Id, por nome (criando se preciso) ou a primeira da escola
+            // 2. Aluno novo: respeita o limite de alunos da licença
+            if (BloqueioLimiteAlunos(escola) is IActionResult limiteAlunos) return limiteAlunos;
+
+            // 3. Descobre a turma: por Id, por nome (criando se preciso) ou a primeira da escola
             Turma? turma = null;
             if (Guid.TryParse(dto.TurmaId, out var turmaIdInformado) && turmaIdInformado != Guid.Empty)
             {
@@ -408,9 +416,11 @@ public class JogoController : ControllerBase
         {
             var escola = await BuscarEscolaComAlunos(tokenEfetivo);
             if (escola == null) return Unauthorized("Token da escola inválido.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
-            var turmaDestino = ObterOuCriarTurma(escola, dto.NomeTurma);
             var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+            if (aluno == null && BloqueioLimiteAlunos(escola) is IActionResult limite) return limite;
+            var turmaDestino = ObterOuCriarTurma(escola, dto.NomeTurma);
 
             if (aluno == null)
             {
@@ -467,12 +477,14 @@ public class JogoController : ControllerBase
         try
         {
             var escola = await _db.Escolas
+                .Include(e => e.Municipio)
                 .Include(e => e.Turmas)
                     .ThenInclude(t => t.Alunos)
                         .ThenInclude(a => a.Progressos)
-                .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
+                .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
 
             if (escola == null) return Unauthorized("Escola não encontrada.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
             var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
             if (aluno == null)
@@ -508,8 +520,9 @@ public class JogoController : ControllerBase
         var tokenEfetivo = NormalizarToken(tokenHeader, token);
         if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
 
-        var escola = await _db.Escolas.FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
+        var escola = await _db.Escolas.Include(e => e.Municipio).FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
         if (escola == null) return Unauthorized("Token da escola inválido.");
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
         var aluno = await _db.Alunos
             .Include(a => a.Turma)
@@ -571,9 +584,10 @@ public class JogoController : ControllerBase
             .Include(e => e.Turmas)
                 .ThenInclude(t => t.Alunos)
                     .ThenInclude(a => a.Progressos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
 
         if (escola == null) return NotFound("Escola não encontrada com este token.");
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
         // O login do professor não é enviado ao jogo (só o nome)
         var salasResumo = escola.Turmas
@@ -589,6 +603,146 @@ public class JogoController : ControllerBase
             tokenAcesso = escola.TokenAcesso,
             salas = salasResumo
         });
+    }
+
+    // =====================================================================
+    // MÁQUINAS: LIMITE DE COMPUTADORES USANDO O JOGO AO MESMO TEMPO
+    // =====================================================================
+
+    private static readonly SemaphoreSlim _travaMaquinas = new(1, 1);
+
+    private static string Cortar(string? texto, int max)
+    {
+        texto = (texto ?? "").Trim();
+        return texto.Length > max ? texto[..max] : texto;
+    }
+
+    /// <summary>
+    /// O jogo chama ao abrir e depois a cada minuto. Registra o computador e confere:
+    /// licença da escola, computador bloqueado e limite de computadores em uso ao mesmo tempo.
+    /// </summary>
+    [HttpPost("maquina/sinal")]
+    public async Task<IActionResult> SinalMaquina(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] SinalMaquinaDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest(new { erro = "Token obrigatório." });
+        string identificador = Cortar(dto.Identificador, 128);
+        if (identificador.Length == 0) return BadRequest(new { erro = "Identificador do computador obrigatório." });
+
+        await _travaMaquinas.WaitAsync();
+        try
+        {
+            var escola = await _db.Escolas.Include(e => e.Municipio).FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
+            if (escola == null) return NotFound(new { codigo = "escola_nao_encontrada", erro = $"Escola com token '{tokenEfetivo}' não encontrada." });
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
+
+            DateTime agora = DateTime.UtcNow;
+            DateTime inicioJanela = agora - Licenca.JanelaMaquinaAtiva;
+
+            var maquina = await _db.Maquinas.FirstOrDefaultAsync(m => m.EscolaId == escola.Id && m.Identificador == identificador);
+            if (maquina == null)
+            {
+                maquina = new Maquina
+                {
+                    Id = Guid.NewGuid(),
+                    EscolaId = escola.Id,
+                    Identificador = identificador,
+                    PrimeiroAcesso = agora,
+                    UltimoSinal = agora.AddDays(-1) // ainda não está "em uso"
+                };
+                _db.Maquinas.Add(maquina);
+            }
+            maquina.Nome = Cortar(dto.Nome, 100);
+            maquina.VersaoJogo = Cortar(dto.VersaoJogo, 20);
+
+            if (maquina.Bloqueada)
+            {
+                await _db.SaveChangesAsync();
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    codigo = "maquina_bloqueada",
+                    erro = "Este computador foi bloqueado pela administração para esta escola. Fale com a coordenação."
+                });
+            }
+
+            bool jaEmUso = maquina.UltimoSinal >= inicioJanela;
+            int outrasEmUso = await _db.Maquinas.CountAsync(m =>
+                m.EscolaId == escola.Id && !m.Bloqueada && m.UltimoSinal >= inicioJanela && m.Id != maquina.Id);
+
+            if (!jaEmUso && outrasEmUso >= escola.LimiteMaquinas)
+            {
+                maquina.UltimaRecusa = agora;
+                await _db.SaveChangesAsync();
+                _logger.LogWarning("Computador {Maquina} recusado na escola {Escola}: {EmUso} de {Limite} em uso",
+                    maquina.Nome, escola.Nome, outrasEmUso, escola.LimiteMaquinas);
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    codigo = "limite_maquinas",
+                    erro = $"A escola já está usando o jogo em {outrasEmUso} computador(es), o máximo da licença ({escola.LimiteMaquinas}). " +
+                           "Feche o jogo em outro computador e tente novamente.",
+                    maquinasEmUso = outrasEmUso,
+                    limiteMaquinas = escola.LimiteMaquinas
+                });
+            }
+
+            maquina.UltimoSinal = agora;
+            await _db.SaveChangesAsync();
+
+            var licenca = Licenca.Avaliar(escola);
+            int totalAlunos = await _db.Alunos.CountAsync(a => a.Ativo && a.Turma!.EscolaId == escola.Id);
+            return Ok(new
+            {
+                liberado = true,
+                maquinasEmUso = outrasEmUso + 1,
+                limiteMaquinas = escola.LimiteMaquinas,
+                intervaloSinalSegundos = Licenca.IntervaloSinalSegundos,
+                temExpiracao = licenca.DataExpiracao.HasValue,
+                dataExpiracao = licenca.DataExpiracao?.ToString("yyyy-MM-dd") ?? "",
+                diasRestantes = licenca.DiasRestantes ?? 0,
+                temLimiteAlunos = escola.LimiteAlunos.HasValue,
+                limiteAlunos = escola.LimiteAlunos ?? 0,
+                totalAlunos
+            });
+        }
+        finally
+        {
+            _travaMaquinas.Release();
+        }
+    }
+
+    /// <summary>
+    /// O jogo chama ao fechar: libera a vaga deste computador na hora (sem esperar 3 minutos).
+    /// </summary>
+    [HttpPost("maquina/encerrar")]
+    public async Task<IActionResult> EncerrarMaquina(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] SinalMaquinaDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest(new { erro = "Token obrigatório." });
+        string identificador = Cortar(dto.Identificador, 128);
+
+        await _travaMaquinas.WaitAsync();
+        try
+        {
+            var escola = await _db.Escolas.FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
+            if (escola == null) return NotFound(new { codigo = "escola_nao_encontrada", erro = "Escola não encontrada." });
+            var maquina = await _db.Maquinas.FirstOrDefaultAsync(m => m.EscolaId == escola.Id && m.Identificador == identificador);
+            if (maquina != null)
+            {
+                maquina.UltimoSinal = DateTime.UtcNow - Licenca.JanelaMaquinaAtiva - TimeSpan.FromMinutes(1);
+                await _db.SaveChangesAsync();
+            }
+            return Ok(new { liberado = true });
+        }
+        finally
+        {
+            _travaMaquinas.Release();
+        }
     }
 
     /// <summary>
@@ -658,10 +812,12 @@ public class JogoController : ControllerBase
         {
             var escola = await BuscarEscolaComAlunos(tokenEfetivo);
             if (escola == null) return Unauthorized("Token da escola inválido.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
             var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
             if (aluno == null)
             {
+                if (BloqueioLimiteAlunos(escola) is IActionResult limite) return limite;
                 var turma = !string.IsNullOrWhiteSpace(dto.NomeTurma)
                     ? ObterOuCriarTurma(escola, dto.NomeTurma)
                     : escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault() ?? ObterOuCriarTurma(escola, "1º Ano A");

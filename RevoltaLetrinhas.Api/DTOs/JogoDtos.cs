@@ -23,6 +23,13 @@ public class CriarAlunoDto
     public string? NomeJogo { get; set; }
 }
 
+public class SinalMaquinaDto
+{
+    public string Identificador { get; set; } = string.Empty;
+    public string? Nome { get; set; }
+    public string? VersaoJogo { get; set; }
+}
+
 public class ProgressoLoteDto
 {
     public string NomeAluno { get; set; } = string.Empty;
@@ -88,6 +95,10 @@ public class InfoEscolaDto
     public int? DiasRestantesContrato { get; set; }
     public bool ContratoValido { get; set; } = true;
     public string TokenAcesso { get; set; } = string.Empty;
+    public bool TemLimiteAlunos { get; set; }
+    public int LimiteAlunos { get; set; }
+    public int TotalAlunos { get; set; }
+    public int LimiteMaquinas { get; set; }
     public List<TurmaComAlunosDto> Turmas { get; set; } = new();
 }
 

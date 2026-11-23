@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Turma> Turmas => Set<Turma>();
     public DbSet<Aluno> Alunos => Set<Aluno>();
     public DbSet<ProgressoFase> ProgressoFases => Set<ProgressoFase>();
+    public DbSet<Maquina> Maquinas => Set<Maquina>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -25,6 +26,11 @@ public class AppDbContext : DbContext
         // Índice composto no Progresso da Fase
         modelBuilder.Entity<ProgressoFase>()
             .HasIndex(p => new { p.AlunoId, p.Materia, p.Nivel, p.NumeroFase })
+            .IsUnique();
+
+        // Um computador aparece uma única vez por escola
+        modelBuilder.Entity<Maquina>()
+            .HasIndex(m => new { m.EscolaId, m.Identificador })
             .IsUnique();
     }
 }
