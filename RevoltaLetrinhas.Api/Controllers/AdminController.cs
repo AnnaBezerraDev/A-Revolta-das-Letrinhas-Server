@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.DTOs;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Servicos;
 
 namespace RevoltaLetrinhas.Api.Controllers;
 
@@ -90,73 +91,10 @@ public class AdminController : ControllerBase
 
         if (escola == null) return NotFound(new { erro = "Escola não encontrada." });
 
-        var salasResumo = new List<ResumoSalaDto>();
-
-        foreach (var turma in escola.Turmas.OrderBy(t => t.Nome))
-        {
-            var alunosDto = new List<AlunoSalaDetalheDto>();
-            int somaFases = 0;
-            int somaErros = 0;
-            double somaEstrelas = 0;
-            int alunosComFases = 0;
-
-            foreach (var aluno in turma.Alunos.Where(a => a.Ativo).OrderBy(a => a.NomeJogo))
-            {
-                var fasesPort = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Portugues");
-                var fasesMath = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Matematica");
-                var totalFases = aluno.Progressos.Count(p => p.Concluida);
-                var pontos = aluno.Progressos.Sum(p => p.Pontuacao);
-                var erros = aluno.Progressos.Sum(p => p.QuantidadeErros);
-                var mediaEstrelas = aluno.Progressos.Any() ? Math.Round(aluno.Progressos.Average(p => p.Estrelas), 1) : 0;
-
-                string status = "Sem Atividade";
-                if (totalFases >= 10) status = erros <= 3 ? "Excelente" : "Bom";
-                else if (totalFases > 0) status = erros > 5 ? "Precisa de Apoio" : "Em Progresso";
-
-                somaFases += totalFases;
-                somaErros += erros;
-                if (totalFases > 0)
-                {
-                    somaEstrelas += mediaEstrelas;
-                    alunosComFases++;
-                }
-
-                alunosDto.Add(new AlunoSalaDetalheDto
-                {
-                    Id = aluno.Id,
-                    NomeCompleto = aluno.NomeCompleto,
-                    NomeJogo = string.IsNullOrWhiteSpace(aluno.NomeJogo) ? aluno.NomeCompleto : aluno.NomeJogo,
-                    FasesPort = fasesPort,
-                    FasesMath = fasesMath,
-                    TotalFases = totalFases,
-                    PontuacaoTotal = pontos,
-                    MediaEstrelas = mediaEstrelas,
-                    ErrosTotais = erros,
-                    StatusDesempenho = status
-                });
-            }
-
-            int totalAlunos = turma.Alunos.Count;
-            double taxaPort = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesPort) / (totalAlunos * 30) * 100, 1) : 0;
-            double taxaMath = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesMath) / (totalAlunos * 30) * 100, 1) : 0;
-
-            salasResumo.Add(new ResumoSalaDto
-            {
-                TurmaId = turma.Id,
-                NomeTurma = turma.Nome,
-                AnoLetivo = turma.AnoLetivo,
-                NomeProfessor = turma.NomeProfessor,
-                LoginProfessor = turma.LoginProfessor,
-                TotalAlunos = totalAlunos,
-                TotalFasesConcluidas = somaFases,
-                MediaFasesPorAluno = totalAlunos > 0 ? Math.Round((double)somaFases / totalAlunos, 1) : 0,
-                MediaEstrelas = alunosComFases > 0 ? Math.Round(somaEstrelas / alunosComFases, 1) : 0,
-                TotalErros = somaErros,
-                TaxaConclusaoPort = Math.Min(100, taxaPort),
-                TaxaConclusaoMath = Math.Min(100, taxaMath),
-                Alunos = alunosDto
-            });
-        }
+        var salasResumo = escola.Turmas
+            .OrderBy(t => t.Nome)
+            .Select(t => CalculoDesempenho.ResumirSala(t, incluirLoginProfessor: true))
+            .ToList();
 
         return Ok(new
         {
@@ -198,9 +136,9 @@ public class AdminController : ControllerBase
                 int math = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Matematica");
                 int total = aluno.Progressos.Count(p => p.Concluida);
                 int pontos = aluno.Progressos.Sum(p => p.Pontuacao);
-                int erros = aluno.Progressos.Sum(p => p.QuantidadeErros);
-                double estrelas = aluno.Progressos.Any() ? Math.Round(aluno.Progressos.Average(p => p.Estrelas), 1) : 0;
-                string status = total >= 10 ? (erros <= 3 ? "Excelente" : "Bom") : (total > 0 ? (erros > 5 ? "Precisa de Apoio" : "Em Progresso") : "Sem Atividade");
+                int erros = aluno.Progressos.Where(p => p.Concluida).Sum(p => p.QuantidadeErros);
+                double estrelas = aluno.Progressos.Any(p => p.Concluida) ? Math.Round(aluno.Progressos.Where(p => p.Concluida).Average(p => p.Estrelas), 1) : 0;
+                string status = CalculoDesempenho.Status(total, erros);
                 string ultimaAtiv = aluno.Progressos.Any() ? aluno.Progressos.Max(p => p.UltimaAtualizacao).ToString("dd/MM/yyyy HH:mm") : "-";
 
                 sb.AppendLine($"{munNome};{escola.Nome};{escola.TokenAcesso};{turma.Nome};{turma.NomeProfessor ?? "Nenhum"};{aluno.NomeCompleto};{aluno.NomeJogo};{port};{math};{total};{pontos};{estrelas};{erros};{status};{ultimaAtiv}");

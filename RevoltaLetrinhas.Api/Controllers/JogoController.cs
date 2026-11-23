@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.DTOs;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Servicos;
 
 namespace RevoltaLetrinhas.Api.Controllers;
 
@@ -97,13 +98,15 @@ public class JogoController : ControllerBase
 
         return Ok(new
         {
-            versao = "1.0.2",
-            versaoCodigo = 102,
+            // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
+            // (e o versaoLocalCodigo do ServicoNuvem.cs no build correspondente).
+            versao = "1.0.3",
+            versaoCodigo = 103,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Botão e modal de vinculação por Token da Escola, login individual de professores sem falhas, fechamento imediato do jogo e limpeza visual de textos."
+            novidades = "Sincronização com o servidor sem perda de dados, salas iguais às do painel, desempenho real das fases e nova Área do Professor com visão da sala e de cada aluno."
         });
     }
 
@@ -572,72 +575,11 @@ public class JogoController : ControllerBase
 
         if (escola == null) return NotFound("Escola não encontrada com este token.");
 
-        var salasResumo = new List<ResumoSalaDto>();
-
-        foreach (var turma in escola.Turmas.OrderBy(t => t.Nome))
-        {
-            var alunosDto = new List<AlunoSalaDetalheDto>();
-            int somaFases = 0;
-            int somaErros = 0;
-            double somaEstrelas = 0;
-            int alunosComFases = 0;
-
-            var alunosAtivos = turma.Alunos.Where(a => a.Ativo).OrderBy(a => a.NomeJogo).ToList();
-            foreach (var aluno in alunosAtivos)
-            {
-                var fasesPort = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Portugues");
-                var fasesMath = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Matematica");
-                var totalFases = aluno.Progressos.Count(p => p.Concluida);
-                var pontos = aluno.Progressos.Sum(p => p.Pontuacao);
-                var erros = aluno.Progressos.Sum(p => p.QuantidadeErros);
-                var mediaEstrelas = aluno.Progressos.Any() ? Math.Round(aluno.Progressos.Average(p => p.Estrelas), 1) : 0;
-
-                string status = "Sem Atividade";
-                if (totalFases >= 10) status = erros <= 3 ? "Excelente" : "Bom";
-                else if (totalFases > 0) status = erros > 5 ? "Precisa de Apoio" : "Em Progresso";
-
-                somaFases += totalFases;
-                somaErros += erros;
-                if (totalFases > 0)
-                {
-                    somaEstrelas += mediaEstrelas;
-                    alunosComFases++;
-                }
-
-                alunosDto.Add(new AlunoSalaDetalheDto
-                {
-                    Id = aluno.Id,
-                    NomeCompleto = aluno.NomeCompleto,
-                    NomeJogo = string.IsNullOrWhiteSpace(aluno.NomeJogo) ? aluno.NomeCompleto : aluno.NomeJogo,
-                    FasesPort = fasesPort,
-                    FasesMath = fasesMath,
-                    TotalFases = totalFases,
-                    PontuacaoTotal = pontos,
-                    MediaEstrelas = mediaEstrelas,
-                    ErrosTotais = erros,
-                    StatusDesempenho = status
-                });
-            }
-
-            int totalAlunos = alunosAtivos.Count;
-            double taxaPort = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesPort) / (totalAlunos * 30) * 100, 1) : 0;
-            double taxaMath = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesMath) / (totalAlunos * 30) * 100, 1) : 0;
-
-            salasResumo.Add(new ResumoSalaDto
-            {
-                TurmaId = turma.Id,
-                NomeTurma = turma.Nome,
-                AnoLetivo = turma.AnoLetivo,
-                TotalAlunos = totalAlunos,
-                TotalFasesConcluidas = somaFases,
-                MediaFasesPorAluno = totalAlunos > 0 ? Math.Round((double)somaFases / totalAlunos, 1) : 0,
-                MediaEstrelas = alunosComFases > 0 ? Math.Round(somaEstrelas / alunosComFases, 1) : 0,
-                TotalErros = somaErros,
-                TaxaConclusaoPort = Math.Min(100, taxaPort),
-                TaxaConclusaoMath = Math.Min(100, taxaMath),
-                Alunos = alunosDto
-            });
-        }
+        // O login do professor não é enviado ao jogo (só o nome)
+        var salasResumo = escola.Turmas
+            .OrderBy(t => t.Nome)
+            .Select(t => CalculoDesempenho.ResumirSala(t, incluirLoginProfessor: false))
+            .ToList();
 
         return Ok(new
         {
@@ -649,22 +591,134 @@ public class JogoController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Detalhe fase a fase de um aluno (Área do Professor do jogo). Resposta embrulhada em objeto
+    /// porque o JsonUtility do Unity não lê um array solto.
+    /// </summary>
     [HttpGet("progresso-aluno/{alunoId:guid}")]
-    public async Task<IActionResult> ObterProgressoAluno(Guid alunoId)
+    public async Task<IActionResult> ObterProgressoAluno(
+        Guid alunoId,
+        [FromQuery] string? token,
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader)
     {
-        var progressos = await _db.ProgressoFases
-            .Where(p => p.AlunoId == alunoId)
-            .Select(p => new
-            {
-                p.Materia,
-                p.Nivel,
-                p.NumeroFase,
-                p.Concluida,
-                p.Estrelas,
-                p.Pontuacao
-            })
-            .ToListAsync();
+        var aluno = await _db.Alunos
+            .Include(a => a.Turma)
+                .ThenInclude(t => t!.Escola)
+            .Include(a => a.Progressos)
+            .FirstOrDefaultAsync(a => a.Id == alunoId);
+        if (aluno == null) return NotFound(new { erro = "Aluno não encontrado." });
 
-        return Ok(progressos);
+        // Se o jogo informar o token, confere que o aluno é da escola dele
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo != null && !string.Equals(aluno.Turma?.Escola?.TokenAcesso, tokenEfetivo, StringComparison.OrdinalIgnoreCase))
+            return NotFound(new { erro = "Aluno não encontrado nesta escola." });
+
+        var resumo = CalculoDesempenho.ResumirAluno(aluno);
+        return Ok(new
+        {
+            alunoId = aluno.Id,
+            nomeJogo = resumo.NomeJogo,
+            nomeCompleto = aluno.NomeCompleto,
+            turmaNome = aluno.Turma?.Nome ?? "",
+            resumo,
+            fases = aluno.Progressos
+                .OrderBy(p => p.Materia).ThenBy(p => p.Nivel).ThenBy(p => p.NumeroFase)
+                .Select(p => new
+                {
+                    materia = p.Materia,
+                    nivel = p.Nivel,
+                    numeroFase = p.NumeroFase,
+                    concluida = p.Concluida,
+                    estrelas = p.Estrelas,
+                    pontuacao = p.Pontuacao,
+                    quantidadeErros = p.QuantidadeErros,
+                    tempoGastoSegundos = p.TempoGastoSegundos,
+                    ultimaAtualizacao = p.UltimaAtualizacao
+                })
+                .ToList()
+        });
+    }
+
+    /// <summary>
+    /// Envia de uma vez o progresso que estava salvo só no computador (versões antigas do jogo
+    /// não mandavam as fases para o servidor). Cadastra o aluno se ele ainda não existir.
+    /// </summary>
+    [HttpPost("progresso-lote")]
+    public async Task<IActionResult> SalvarProgressoLote(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] ProgressoLoteDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        if (string.IsNullOrWhiteSpace(dto.NomeAluno)) return BadRequest("Nome do aluno é obrigatório.");
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return Unauthorized("Token da escola inválido.");
+
+            var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+            if (aluno == null)
+            {
+                var turma = !string.IsNullOrWhiteSpace(dto.NomeTurma)
+                    ? ObterOuCriarTurma(escola, dto.NomeTurma)
+                    : escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault() ?? ObterOuCriarTurma(escola, "1º Ano A");
+                aluno = new Aluno
+                {
+                    Id = Guid.NewGuid(),
+                    TurmaId = turma.Id,
+                    NomeCompleto = dto.NomeAluno.Trim(),
+                    NomeJogo = dto.NomeAluno.Trim(),
+                    Ativo = true,
+                    DataCriacao = DateTime.UtcNow
+                };
+                _db.Alunos.Add(aluno);
+                await _db.SaveChangesAsync();
+            }
+
+            var existentes = await _db.ProgressoFases.Where(p => p.AlunoId == aluno.Id).ToListAsync();
+            int salvos = 0;
+            foreach (var item in dto.Itens ?? new List<ProgressoItemDto>())
+            {
+                if (item.NumeroFase <= 0) continue;
+                var atual = existentes.FirstOrDefault(p => p.Materia == item.Materia && p.Nivel == item.Nivel && p.NumeroFase == item.NumeroFase);
+                if (atual == null)
+                {
+                    atual = new ProgressoFase
+                    {
+                        Id = Guid.NewGuid(),
+                        AlunoId = aluno.Id,
+                        Materia = item.Materia,
+                        Nivel = item.Nivel,
+                        NumeroFase = item.NumeroFase
+                    };
+                    _db.ProgressoFases.Add(atual);
+                    existentes.Add(atual);
+                }
+                else if (atual.Concluida)
+                {
+                    // O servidor já tem esta fase: o histórico local não sobrescreve um dado mais novo
+                    continue;
+                }
+
+                atual.Concluida = atual.Concluida || item.Concluida;
+                atual.Estrelas = Math.Max(atual.Estrelas, item.Estrelas);
+                atual.Pontuacao = Math.Max(atual.Pontuacao, item.Pontuacao);
+                atual.QuantidadeErros = item.QuantidadeErros;
+                atual.TempoGastoSegundos = item.TempoGastoSegundos;
+                atual.UltimaAtualizacao = DateTime.UtcNow;
+                salvos++;
+            }
+
+            await _db.SaveChangesAsync();
+            _logger.LogInformation("Progresso local enviado em lote: {Aluno} ({Salvos} fases) na escola {Escola}", aluno.NomeJogo, salvos, escola.Nome);
+            return Ok(new { alunoId = aluno.Id, salvos });
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
     }
 }

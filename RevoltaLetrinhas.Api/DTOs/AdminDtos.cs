@@ -64,6 +64,8 @@ public class ResumoSalaDto
     public int TotalErros { get; set; }
     public double TaxaConclusaoPort { get; set; }
     public double TaxaConclusaoMath { get; set; }
+    public int AlunosAtivos { get; set; }
+    public DateTime? UltimaAtividade { get; set; }
     public List<AlunoSalaDetalheDto> Alunos { get; set; } = new();
 }
 
@@ -78,5 +80,7 @@ public class AlunoSalaDetalheDto
     public int PontuacaoTotal { get; set; }
     public double MediaEstrelas { get; set; }
     public int ErrosTotais { get; set; }
+    public int TempoTotalSegundos { get; set; }
     public string StatusDesempenho { get; set; } = "Regular";
+    public DateTime? UltimaAtividade { get; set; }
 }

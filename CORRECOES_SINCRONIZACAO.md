@@ -46,6 +46,32 @@ Backup completo de antes das mudanças: `Downloads\Backup_RevoltaLetrinhas_2026-
 - Aluno excluído / cadastrado no painel sumiu / apareceu no jogo na abertura seguinte.
 - Não testado: a tela do jogo clicando nos botões (as chamadas dos botões foram conferidas na compilação), e o deploy real no Render.
 
+## Versão 1.0.3 (23/11/2026) — salas, professor e nova Área do Professor
+
+**Problemas corrigidos**
+- **Salas no jogo que não existiam no banco:** o jogo juntava salas "padrão" (1º Ano A, 1º Ano B…) e salas antigas
+  salvas no PC. Agora, ao sincronizar, a lista de salas do PC passa a ser **exatamente a do servidor** (mais as
+  salas criadas no jogo que ainda estão sendo enviadas). As sugestões só aparecem se o jogo nunca falou com o servidor.
+- **Professor via dados incorretos:** a Área do Professor lia só os dados salvos naquele computador; o login tinha
+  um "plano B" local que aceitava a senha `1234` para qualquer professor; e o jogo enviava sempre 3 estrelas,
+  1000 pontos e 0 erros. Agora o login de professor é só pelo servidor, o jogo envia o resultado real de cada
+  fase (vidas que sobraram e tempo) e o painel usa os dados do servidor (todos os computadores da escola).
+- **Progresso antigo:** as fases concluídas antes da correção são enviadas ao servidor uma única vez
+  (`POST /api/jogo/progresso-lote`).
+- Taxa de conclusão calculada sobre 90 fases por matéria (antes usava 30 e passava de 100%).
+- Situação do aluno pela taxa de erros (antes era por número absoluto de erros).
+
+**Nova Área do Professor (`Assets/PainelProfessorNuvem.cs`)**
+- *Visão da sala:* alunos, fases concluídas, média por aluno, média de estrelas, taxa de acerto, progresso em
+  Português e Matemática, situação dos alunos, ranking clicável e lista "Precisam de atenção".
+- *Alunos:* busca, ficha com mapa das 90 fases de cada matéria (cor pelas estrelas), pontuação, tempo jogado,
+  última atividade, parecer pedagógico e "Copiar relatório".
+- Professor de sala vê só a sua sala; o acesso geral (`professor` / senha geral) vê todas e compara as salas.
+
+**Servidor:** `Servicos/CalculoDesempenho.cs` centraliza os indicadores (painel web e jogo usam o mesmo cálculo);
+`/api/jogo/salas-resumo` traz professor e última atividade; `/api/jogo/progresso-aluno/{id}` traz o detalhe fase
+a fase; `/api/jogo/versao` = 1.0.3 (código 103) com o patch novo em `wwwroot/patch/`.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra

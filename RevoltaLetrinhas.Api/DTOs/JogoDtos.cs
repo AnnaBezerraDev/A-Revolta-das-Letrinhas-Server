@@ -23,6 +23,26 @@ public class CriarAlunoDto
     public string? NomeJogo { get; set; }
 }
 
+public class ProgressoLoteDto
+{
+    public string NomeAluno { get; set; } = string.Empty;
+    public string? NomeTurma { get; set; }
+    public List<ProgressoItemDto> Itens { get; set; } = new();
+}
+
+/// <summary>Fase do lote. Sem AlunoId de propósito: o jogo envia "alunoId":"" e um Guid recusaria o JSON.</summary>
+public class ProgressoItemDto
+{
+    public string Materia { get; set; } = "Portugues";
+    public string Nivel { get; set; } = "Facil";
+    public int NumeroFase { get; set; }
+    public bool Concluida { get; set; }
+    public int Estrelas { get; set; }
+    public int Pontuacao { get; set; }
+    public int QuantidadeErros { get; set; }
+    public int TempoGastoSegundos { get; set; }
+}
+
 public class CriarTurmaJogoDto
 {
     public string NomeTurma { get; set; } = string.Empty;
