@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Seguranca;
 
 // Permite gravar datas de qualquer tipo (Local/Unspecified/UTC) no PostgreSQL.
 // Sem isso, cadastrar uma prefeitura com data de expiração dá erro 500 quando o banco é PostgreSQL.
@@ -11,6 +12,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Banco de dados: PostgreSQL (ConnectionStrings:PostgresConnection ou DATABASE_URL) ou SQLite local.
 var infoBanco = ConfiguracaoBanco.Registrar(builder);
 builder.Services.AddSingleton(infoBanco);
+
+// Senha do painel de administração (variável de ambiente ADMIN_SENHA). Ver Seguranca/AcessoAdmin.cs.
+builder.Services.AddSingleton<AcessoAdmin>();
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
@@ -30,6 +34,16 @@ app.Logger.LogInformation("Banco de dados em uso: {Provedor} ({Local})", infoBan
 if (!string.IsNullOrEmpty(infoBanco.Aviso))
 {
     app.Logger.LogWarning("{Aviso}", infoBanco.Aviso);
+}
+
+var acessoAdmin = app.Services.GetRequiredService<AcessoAdmin>();
+if (acessoAdmin.SenhaConfigurada)
+{
+    app.Logger.LogInformation("Painel de administração protegido pela senha {Chave}.", AcessoAdmin.ChaveConfiguracao);
+}
+foreach (var aviso in acessoAdmin.Avisos)
+{
+    app.Logger.LogWarning("{Aviso}", aviso);
 }
 
 // Inicializa o banco de dados e garante as escolas fixas
