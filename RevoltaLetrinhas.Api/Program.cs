@@ -2,24 +2,20 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.Models;
 
+// Permite gravar datas de qualquer tipo (Local/Unspecified/UTC) no PostgreSQL.
+// Sem isso, cadastrar uma prefeitura com data de expiração dá erro 500 quando o banco é PostgreSQL.
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Configuração do Banco de Dados: SQLite local por padrão (ou PostgreSQL via appsettings/env)
-var postgresConn = builder.Configuration.GetConnectionString("PostgresConnection");
-if (!string.IsNullOrEmpty(postgresConn))
-{
-    builder.Services.AddDbContext<AppDbContext>(opt => opt.UseNpgsql(postgresConn));
-}
-else
-{
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-        opt.UseSqlite("Data Source=revoltaletrinhas.db"));
-}
+// Banco de dados: PostgreSQL (ConnectionStrings:PostgresConnection ou DATABASE_URL) ou SQLite local.
+var infoBanco = ConfiguracaoBanco.Registrar(builder);
+builder.Services.AddSingleton(infoBanco);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// Habilita CORS para o jogo Unity e painel Web
+// Habilita CORS para o jogo Unity e para o painel web (inclusive o painel aberto em http://localhost)
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("PermitirTudo", p =>
@@ -30,13 +26,21 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Inicializa o banco de dados e cria dados demo se estiver vazio
+app.Logger.LogInformation("Banco de dados em uso: {Provedor} ({Local})", infoBanco.Provedor, infoBanco.Local);
+if (!string.IsNullOrEmpty(infoBanco.Aviso))
+{
+    app.Logger.LogWarning("{Aviso}", infoBanco.Aviso);
+}
+
+// Inicializa o banco de dados e garante as escolas fixas
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 
-    if (!db.Escolas.Any())
+    // Dados de demonstração SOMENTE no ambiente de desenvolvimento (servidor local).
+    // Em produção eles misturavam escolas fictícias com as escolas reais.
+    if (app.Environment.IsDevelopment() && !db.Escolas.Any())
     {
         var mun1 = new Municipio { Nome = "Campinas", UF = "SP" };
         var mun2 = new Municipio { Nome = "Ribeirão Preto", UF = "SP" };
@@ -57,7 +61,6 @@ using (var scope = app.Services.CreateScope())
         var a4 = new Aluno { Turma = tur2, NomeCompleto = "Gabriela Santos", NomeJogo = "Gabriela" };
         db.Alunos.AddRange(a1, a2, a3, a4);
 
-        // Fases iniciais de exemplo
         db.ProgressoFases.AddRange(
             new ProgressoFase { Aluno = a1, Materia = "Portugues", Nivel = "Facil", NumeroFase = 1, Concluida = true, Estrelas = 3, Pontuacao = 1500, TempoGastoSegundos = 45 },
             new ProgressoFase { Aluno = a1, Materia = "Portugues", Nivel = "Facil", NumeroFase = 2, Concluida = true, Estrelas = 3, Pontuacao = 1400, TempoGastoSegundos = 50 },
@@ -68,59 +71,9 @@ using (var scope = app.Services.CreateScope())
         db.SaveChanges();
     }
 
-    // Garante que a escola Teste (ESC-TESTE) existe com a turma 3A e professora Anna
-    if (!db.Escolas.Any(e => e.TokenAcesso == "ESC-TESTE"))
-    {
-        var mun = db.Municipios.FirstOrDefault(m => m.Nome == "Ribeirão Preto") ?? new Municipio { Nome = "Ribeirão Preto", UF = "SP" };
-        if (mun.Id == Guid.Empty) db.Municipios.Add(mun);
-
-        var escTeste = new Escola
-        {
-            Municipio = mun,
-            Nome = "Teste",
-            TokenAcesso = "ESC-TESTE",
-            Ativa = true
-        };
-        db.Escolas.Add(escTeste);
-
-        var tur3A = new Turma
-        {
-            Escola = escTeste,
-            Nome = "3A",
-            NomeProfessor = "Anna",
-            LoginProfessor = "profanna",
-            SenhaProfessor = "1234"
-        };
-        db.Turmas.Add(tur3A);
-        db.SaveChanges();
-    }
-
-    // Garante que a escola Olinto (ESC-OLINTO) também existe com turma 3ºANO A
-    if (!db.Escolas.Any(e => e.TokenAcesso == "ESC-OLINTO"))
-    {
-        var munJaborandi = db.Municipios.FirstOrDefault(m => m.Nome == "Jaborandi") ?? new Municipio { Nome = "Jaborandi", UF = "SP" };
-        if (munJaborandi.Id == Guid.Empty) db.Municipios.Add(munJaborandi);
-
-        var escOlinto = new Escola
-        {
-            Municipio = munJaborandi,
-            Nome = "Olinto",
-            TokenAcesso = "ESC-OLINTO",
-            Ativa = true
-        };
-        db.Escolas.Add(escOlinto);
-
-        var turOlinto = new Turma
-        {
-            Escola = escOlinto,
-            Nome = "3ºANO A",
-            NomeProfessor = "Professora Anna",
-            LoginProfessor = "prof.anna",
-            SenhaProfessor = "1234"
-        };
-        db.Turmas.Add(turOlinto);
-        db.SaveChanges();
-    }
+    // Escolas fixas usadas pelo jogo: são recriadas automaticamente se não existirem.
+    GarantirEscola(db, "ESC-TESTE", "Teste", "Ribeirão Preto", "3A", "Anna", "profanna");
+    GarantirEscola(db, "ESC-OLINTO", "Olinto", "Jaborandi", "3ºANO A", "Professora Anna", "prof.anna");
 }
 
 app.UseCors("PermitirTudo");
@@ -137,3 +90,30 @@ if (app.Environment.IsDevelopment())
 app.MapControllers();
 
 app.Run();
+
+static void GarantirEscola(AppDbContext db, string token, string nomeEscola, string nomeMunicipio,
+                           string nomeTurma, string nomeProfessor, string loginProfessor)
+{
+    if (db.Escolas.Any(e => e.TokenAcesso == token)) return;
+
+    var mun = db.Municipios.FirstOrDefault(m => m.Nome == nomeMunicipio);
+    if (mun == null)
+    {
+        mun = new Municipio { Nome = nomeMunicipio, UF = "SP" };
+        db.Municipios.Add(mun);
+    }
+
+    var escola = new Escola { Municipio = mun, Nome = nomeEscola, TokenAcesso = token, Ativa = true };
+    db.Escolas.Add(escola);
+
+    db.Turmas.Add(new Turma
+    {
+        Escola = escola,
+        Nome = nomeTurma,
+        NomeProfessor = nomeProfessor,
+        LoginProfessor = loginProfessor,
+        SenhaProfessor = "1234"
+    });
+
+    db.SaveChanges();
+}

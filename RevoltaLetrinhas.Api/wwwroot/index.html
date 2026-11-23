@@ -191,11 +191,22 @@
       <h1>✨ A Revolta das Letrinhas</h1>
       <p style="font-size: 13px; opacity: 0.9; margin-top: 3px;">Painel de Gestão Municipal e Escolar — Parceria com Prefeituras</p>
     </div>
-    <div class="status-badge">
-      <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:white;"></span>
-      SERVIDOR NUVEM ATIVO (api.kairosstudios.site)
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+      <div class="status-badge" id="statusServidor" title="Servidor de onde este painel está lendo os dados">
+        <span id="statusPonto" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:white;"></span>
+        <span id="statusTexto">Conectando...</span>
+      </div>
+      <div id="seletorBancoBox" style="display:none; font-size:12px;">
+        <label for="seletorBanco" style="opacity:0.9;">Mostrar dados de:</label>
+        <select id="seletorBanco" onchange="trocarServidor(this.value)" style="padding:3px 6px; border-radius:6px; border:none; font-size:12px;">
+          <option value="nuvem">☁️ Nuvem (o mesmo banco que o jogo usa)</option>
+          <option value="local">💻 Este computador (banco local de testes)</option>
+        </select>
+      </div>
     </div>
   </header>
+
+  <div id="avisoServidor" style="display:none; max-width:1400px; margin:16px auto 0; padding:12px 16px; border-radius:10px; background:#FEF3C7; color:#92400E; font-size:14px; font-weight:600;"></div>
 
   <div class="container">
     <!-- MÉTRICAS GERAIS -->
@@ -406,6 +417,105 @@
     let dadosGerais = null;
     let escolaAtualId = null;
     let salasDaEscolaAtual = [];
+    let salaSelecionadaId = null;
+
+    /* =====================================================================
+       DE QUAL SERVIDOR O PAINEL LÊ OS DADOS
+       O jogo grava SEMPRE na nuvem (config_escola.json -> api.kairosstudios.site).
+       Quando o painel é aberto pelo IniciarServidor.bat (http://localhost), ele
+       passa a ler da nuvem por padrão; assim o que é cadastrado no jogo aparece aqui.
+       ===================================================================== */
+    const URL_NUVEM = 'https://api.kairosstudios.site';
+    const PAINEL_LOCAL = ['localhost', '127.0.0.1', '[::1]', ''].includes(location.hostname) || location.protocol === 'file:';
+
+    function lerPreferenciaServidor() {
+      try { return localStorage.getItem('painel_servidor') || 'nuvem'; } catch (e) { return 'nuvem'; }
+    }
+
+    let modoServidor = PAINEL_LOCAL ? lerPreferenciaServidor() : 'nuvem';
+    let API = (PAINEL_LOCAL && modoServidor === 'nuvem') ? URL_NUVEM : '';
+
+    function trocarServidor(modo) {
+      try { localStorage.setItem('painel_servidor', modo); } catch (e) {}
+      modoServidor = modo;
+      API = modo === 'nuvem' ? URL_NUVEM : '';
+      escolaAtualId = null;
+      salaSelecionadaId = null;
+      atualizarStatusServidor();
+      recarregarDados();
+    }
+
+    async function atualizarStatusServidor() {
+      const texto = document.getElementById('statusTexto');
+      const ponto = document.getElementById('statusPonto');
+      const aviso = document.getElementById('avisoServidor');
+      const nomeServidor = (API === URL_NUVEM || !PAINEL_LOCAL) ? 'NUVEM (api.kairosstudios.site)' : 'LOCAL (este computador)';
+
+      document.getElementById('seletorBancoBox').style.display = PAINEL_LOCAL ? 'block' : 'none';
+      document.getElementById('seletorBanco').value = modoServidor;
+
+      try {
+        let st = {};
+        try {
+          st = await api('/api/status');
+        } catch (e) {
+          // Servidor com versão antiga (sem /api/status): confere se pelo menos está no ar
+          await api('/api/jogo/versao');
+        }
+        texto.innerText = `CONECTADO: ${nomeServidor}`;
+        ponto.style.background = '#22C55E';
+
+        const avisos = [];
+        if (st.aviso) avisos.push('⚠️ ' + st.aviso);
+        if (PAINEL_LOCAL && API === '') avisos.push('💻 Você está vendo o banco LOCAL de testes. O jogo grava na NUVEM — troque para "Nuvem" no canto superior direito para ver os dados do jogo.');
+        aviso.innerText = avisos.join('\n');
+        aviso.style.display = avisos.length ? 'block' : 'none';
+      } catch (err) {
+        texto.innerText = `SEM CONEXÃO: ${nomeServidor}`;
+        ponto.style.background = '#EF4444';
+        aviso.innerText = `❌ Não foi possível falar com o servidor ${nomeServidor}: ${err.message}. ` +
+          (API === URL_NUVEM ? 'Se o servidor estava parado, ele pode levar até 1 minuto para acordar — clique em "Atualizar".' : '');
+        aviso.style.display = 'block';
+      }
+    }
+
+    /** fetch que lança erro com a mensagem do servidor quando a resposta não é 2xx */
+    async function api(caminho, opcoes) {
+      const res = await fetch(API + caminho, opcoes);
+      const corpo = await res.text();
+      let dados = null;
+      try { dados = corpo ? JSON.parse(corpo) : null; } catch (e) { dados = corpo; }
+      if (!res.ok) {
+        let msg = typeof dados === 'string' ? dados : (dados && (dados.erro || dados.title)) || '';
+        throw new Error(`HTTP ${res.status}${msg ? ' - ' + msg : ''}`);
+      }
+      return dados;
+    }
+
+    function enviarJson(caminho, metodo, corpo) {
+      return api(caminho, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+    }
+
+    /** Escapa texto para HTML (nomes com < > & aspas) */
+    function esc(t) {
+      return String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    /** Escapa texto para usar como argumento de função dentro de onclick="..." (nomes com apóstrofo, ex: D'Ávila) */
+    function arg(t) {
+      return esc(JSON.stringify(String(t ?? '')));
+    }
+
+    function algumModalAberto() {
+      return document.getElementById('modalProfessor').style.display === 'flex';
+    }
+
+    // Atualiza sozinho a cada 30s (somente na aba de salas, com a janela visível e sem modal aberto)
+    setInterval(() => {
+      if (document.hidden || algumModalAberto()) return;
+      if (document.getElementById('abaSalas').style.display === 'none') return;
+      recarregarDados(true);
+    }, 30000);
 
     function mudarAba(aba) {
       document.getElementById('abaSalas').style.display = aba === 'salas' ? 'block' : 'none';
@@ -417,10 +527,9 @@
       document.getElementById('btnTabGestao').classList.toggle('active', aba === 'gestao');
     }
 
-    async function recarregarDados() {
+    async function recarregarDados(silencioso = false) {
       try {
-        const res = await fetch('/api/admin/visao-geral');
-        dadosGerais = await res.json();
+        dadosGerais = await api('/api/admin/visao-geral');
 
         document.getElementById('totMunicipios').innerText = dadosGerais.metricas.totalMunicipios;
         document.getElementById('totEscolas').innerText = dadosGerais.metricas.totalEscolas;
@@ -435,12 +544,17 @@
           if (!escolaAtualId || !dadosGerais.escolas.some(e => e.id === escolaAtualId)) {
             escolaAtualId = dadosGerais.escolas[0].id;
           }
-          carregarSalasEscola(escolaAtualId);
+          await carregarSalasEscola(escolaAtualId, silencioso);
         } else {
           document.getElementById('containerSalas').innerHTML = '<p style="color:#64748B;">Nenhuma escola cadastrada.</p>';
+          document.getElementById('bannerPrefeitura').style.display = 'none';
+          document.getElementById('detalheSalaBox').style.display = 'none';
         }
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
+        if (!silencioso) {
+          document.getElementById('containerSalas').innerHTML = `<p style="color:red;">Erro ao carregar dados do servidor: ${esc(err.message)}</p>`;
+        }
       }
     }
 
@@ -471,14 +585,14 @@
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td><strong>🏛️ ${m.nome}</strong></td>
-          <td>${m.uf}</td>
-          <td><code>${m.numeroConvenio || 'Pendente'}</code></td>
+          <td><strong>🏛️ ${esc(m.nome)}</strong></td>
+          <td>${esc(m.uf)}</td>
+          <td><code>${esc(m.numeroConvenio || 'Pendente')}</code></td>
           <td>${m.totalEscolas} escolas</td>
           <td>${dataStr}</td>
           <td>${statusBadge}</td>
           <td>
-            <button class="btn btn-sm btn-danger" onclick="excluirMunicipio('${m.id}', '${m.nome}')">🗑️ Excluir</button>
+            <button class="btn btn-sm btn-danger" onclick="excluirMunicipio(${arg(m.id)}, ${arg(m.nome)})">🗑️ Excluir</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -515,17 +629,19 @@
 
     function aoTrocarEscola() {
       escolaAtualId = document.getElementById('selectEscolaFiltro').value;
+      salaSelecionadaId = null;
       carregarSalasEscola(escolaAtualId);
     }
 
-    async function carregarSalasEscola(escolaId) {
+    async function carregarSalasEscola(escolaId, silencioso = false) {
       const container = document.getElementById('containerSalas');
-      container.innerHTML = '<p style="color: #64748B;">Carregando salas...</p>';
-      document.getElementById('detalheSalaBox').style.display = 'none';
+      if (!silencioso) {
+        container.innerHTML = '<p style="color: #64748B;">Carregando salas...</p>';
+        document.getElementById('detalheSalaBox').style.display = 'none';
+      }
 
       try {
-        const res = await fetch(`/api/admin/escola/${escolaId}/salas-resumo`);
-        const data = await res.json();
+        const data = await api(`/api/admin/escola/${escolaId}/salas-resumo`);
         salasDaEscolaAtual = data.salas || [];
 
         // Atualiza o Banner de Expiração da Prefeitura
@@ -536,24 +652,25 @@
           banner.style.display = 'flex';
           banner.innerHTML = `
             <div>
-              <strong>🏛️ Prefeitura / Convênio:</strong> ${data.municipio} | 
-              <strong>Validade do Contrato:</strong> ${dExp.toLocaleDateString('pt-BR')} 
+              <strong>🏛️ Prefeitura / Convênio:</strong> ${esc(data.municipio)} |
+              <strong>Validade do Contrato:</strong> ${dExp.toLocaleDateString('pt-BR')}
               (${diffDays >= 0 ? `<span class="badge-exp-ok">${diffDays} dias restantes</span>` : `<span class="badge-exp-danger">EXPIRADO</span>`})
             </div>
             <div>
-              Token da Escola no Jogo: <span class="badge badge-token">${data.tokenAcesso}</span>
+              Token da Escola no Jogo: <span class="badge badge-token">${esc(data.tokenAcesso)}</span>
             </div>
           `;
         } else {
           banner.style.display = 'flex';
           banner.innerHTML = `
-            <div><strong>🏛️ Município:</strong> ${data.municipio} (Sem data de expiração cadastrada)</div>
-            <div>Token da Escola: <span class="badge badge-token">${data.tokenAcesso}</span></div>
+            <div><strong>🏛️ Município:</strong> ${esc(data.municipio)} (Sem data de expiração cadastrada)</div>
+            <div>Token da Escola: <span class="badge badge-token">${esc(data.tokenAcesso)}</span></div>
           `;
         }
 
-        // Preenche o select de turmas para cadastro de aluno
+        // Preenche o select de turmas para cadastro de aluno (mantendo a escolha atual)
         const selAlunoTurma = document.getElementById('cadAlunoTurma');
+        const turmaEscolhida = selAlunoTurma.value;
         selAlunoTurma.innerHTML = '';
         salasDaEscolaAtual.forEach(s => {
           const opt = document.createElement('option');
@@ -561,30 +678,32 @@
           opt.innerText = s.nomeTurma;
           selAlunoTurma.appendChild(opt);
         });
+        if (salasDaEscolaAtual.some(s => s.turmaId === turmaEscolhida)) selAlunoTurma.value = turmaEscolhida;
 
         if (salasDaEscolaAtual.length === 0) {
           container.innerHTML = '<p style="color: #64748B;">Nenhuma sala cadastrada nesta escola ainda.</p>';
+          document.getElementById('detalheSalaBox').style.display = 'none';
           return;
         }
 
         container.innerHTML = '';
         salasDaEscolaAtual.forEach(sala => {
-          const profInfo = sala.nomeProfessor 
-            ? `👨‍🏫 Prof. ${sala.nomeProfessor} (login: <code>${sala.loginProfessor}</code>)` 
+          const profInfo = sala.nomeProfessor
+            ? `👨‍🏫 Prof. ${esc(sala.nomeProfessor)} (login: <code>${esc(sala.loginProfessor)}</code>)`
             : `👨‍🏫 Nenhum professor específico vinculado`;
 
           const card = document.createElement('div');
           card.className = 'sala-card';
           card.innerHTML = `
             <div class="sala-header">
-              <h4>🚪 ${sala.nomeTurma}</h4>
-              <button class="btn btn-sm btn-danger" style="padding:3px 8px; font-size:11px;" onclick="excluirSala('${sala.turmaId}', '${sala.nomeTurma}')" title="Excluir Sala">
+              <h4>🚪 ${esc(sala.nomeTurma)}</h4>
+              <button class="btn btn-sm btn-danger" style="padding:3px 8px; font-size:11px;" onclick="excluirSala(${arg(sala.turmaId)}, ${arg(sala.nomeTurma)})" title="Excluir Sala">
                 🗑️
               </button>
             </div>
 
             <div class="prof-tag">${profInfo}</div>
-            <button class="btn btn-sm" style="background:#4F46E5; color:white; width:100%; margin-bottom:10px; font-size:12px; padding:5px 8px; border-radius:6px;" onclick="abrirModalProfessor('${sala.turmaId}', '${sala.nomeTurma}', '${sala.nomeProfessor || ''}', '${sala.loginProfessor || ''}')">
+            <button class="btn btn-sm" style="background:#4F46E5; color:white; width:100%; margin-bottom:10px; font-size:12px; padding:5px 8px; border-radius:6px;" onclick="abrirModalProfessor(${arg(sala.turmaId)}, ${arg(sala.nomeTurma)}, ${arg(sala.nomeProfessor || '')}, ${arg(sala.loginProfessor || '')})">
               ✏️ Definir / Alterar Professor e Senha
             </button>
 
@@ -619,24 +738,27 @@
               <span>🎮 ${sala.totalFasesConcluidas} Fases Feitas</span>
             </div>
 
-            <button class="btn btn-sm" style="width:100%; margin-top:12px;" onclick="verAlunosDaSala('${sala.turmaId}')">
+            <button class="btn btn-sm" style="width:100%; margin-top:12px;" onclick="verAlunosDaSala(${arg(sala.turmaId)})">
               Ver Alunos da Sala 👁️
             </button>
           `;
           container.appendChild(card);
         });
 
-        if (salasDaEscolaAtual.length > 0) {
-          verAlunosDaSala(salasDaEscolaAtual[0].turmaId);
-        }
+        // Mantém aberta a sala que o usuário estava vendo (a atualização automática não "pula" para a primeira)
+        const salaParaMostrar = salasDaEscolaAtual.some(s => s.turmaId === salaSelecionadaId)
+          ? salaSelecionadaId
+          : salasDaEscolaAtual[0].turmaId;
+        verAlunosDaSala(salaParaMostrar);
       } catch (err) {
-        container.innerHTML = `<p style="color:red;">Erro ao buscar salas: ${err}</p>`;
+        if (!silencioso) container.innerHTML = `<p style="color:red;">Erro ao buscar salas: ${esc(err.message)}</p>`;
       }
     }
 
     function verAlunosDaSala(turmaId) {
       const sala = salasDaEscolaAtual.find(s => s.turmaId === turmaId);
       if (!sala) return;
+      salaSelecionadaId = turmaId;
 
       const box = document.getElementById('detalheSalaBox');
       box.style.display = 'block';
@@ -651,14 +773,14 @@
       }
 
       sala.alunos.forEach(a => {
-        let statusBadge = `<span class="badge badge-status-progresso">${a.statusDesempenho}</span>`;
+        let statusBadge = `<span class="badge badge-status-progresso">${esc(a.statusDesempenho)}</span>`;
         if (a.statusDesempenho === "Excelente") statusBadge = `<span class="badge badge-status-excelente">Excelente ⭐⭐⭐</span>`;
         if (a.statusDesempenho === "Precisa de Apoio") statusBadge = `<span class="badge badge-status-apoio">Precisa de Apoio ⚠️</span>`;
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td><strong>${a.nomeCompleto}</strong></td>
-          <td><span style="font-family:monospace; color:#4F46E5;">${a.nomeJogo}</span></td>
+          <td><strong>${esc(a.nomeCompleto)}</strong></td>
+          <td><span style="font-family:monospace; color:#4F46E5;">${esc(a.nomeJogo)}</span></td>
           <td>📘 ${a.fasesPort} / 30</td>
           <td>🔢 ${a.fasesMath} / 30</td>
           <td><strong style="color:#059669;">${a.totalFases}</strong></td>
@@ -666,7 +788,7 @@
           <td>⭐ ${a.mediaEstrelas}</td>
           <td><span style="color: ${a.errosTotais > 3 ? '#DC2626' : '#16A34A'}">${a.errosTotais}</span></td>
           <td>${statusBadge}</td>
-          <td><button class="btn btn-sm btn-danger" style="padding:4px 8px; font-size:11px;" onclick="excluirAlunoPainel('${a.id}', '${a.nomeCompleto}')">🗑️ Excluir</button></td>
+          <td><button class="btn btn-sm btn-danger" style="padding:4px 8px; font-size:11px;" onclick="excluirAlunoPainel(${arg(a.id)}, ${arg(a.nomeCompleto)})">🗑️ Excluir</button></td>
         `;
         tbody.appendChild(tr);
       });
@@ -675,7 +797,7 @@
     /* DOWNLOAD DOS DADOS DA ESCOLA (CSV / EXCEL) */
     function baixarDadosEscolaCsv() {
       if (!escolaAtualId) return alert("Selecione uma escola primeiro.");
-      window.location.href = `/api/admin/escola/${escolaAtualId}/exportar-csv`;
+      window.location.href = `${API}/api/admin/escola/${escolaAtualId}/exportar-csv`;
     }
 
     /* EXCLUSÕES */
@@ -683,20 +805,17 @@
       if (!escolaAtualId) return;
       const escola = dadosGerais.escolas.find(e => e.id === escolaAtualId);
       const nome = escola ? escola.nome : "esta escola";
-      
+
       if (!confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a escola "${nome}"?\nTodas as salas e alunos vinculados serão removidos!`)) return;
 
       try {
-        const res = await fetch(`/api/admin/escolas/${escolaAtualId}`, { method: 'DELETE' });
-        if (res.ok) {
-          alert(`Escola "${nome}" excluída com sucesso!`);
-          escolaAtualId = null;
-          recarregarDados();
-        } else {
-          alert("Erro ao excluir escola.");
-        }
+        await api(`/api/admin/escolas/${escolaAtualId}`, { method: 'DELETE' });
+        alert(`Escola "${nome}" excluída com sucesso!`);
+        escolaAtualId = null;
+        salaSelecionadaId = null;
+        recarregarDados();
       } catch (err) {
-        alert("Erro na requisição: " + err);
+        alert("Erro ao excluir escola: " + err.message);
       }
     }
 
@@ -704,16 +823,12 @@
       if (!confirm(`Deseja realmente excluir a sala "${nomeTurma}" e todos os alunos cadastrados nela?`)) return;
 
       try {
-        const res = await fetch(`/api/admin/turmas/${turmaId}`, { method: 'DELETE' });
-        if (res.ok) {
-          alert(`Sala "${nomeTurma}" excluída com sucesso!`);
-          carregarSalasEscola(escolaAtualId);
-          recarregarDados();
-        } else {
-          alert("Erro ao excluir sala.");
-        }
+        await api(`/api/admin/turmas/${turmaId}`, { method: 'DELETE' });
+        alert(`Sala "${nomeTurma}" excluída com sucesso!`);
+        if (salaSelecionadaId === turmaId) salaSelecionadaId = null;
+        recarregarDados();
       } catch (err) {
-        alert("Erro na requisição: " + err);
+        alert("Erro ao excluir sala: " + err.message);
       }
     }
 
@@ -721,118 +836,118 @@
       if (!confirm(`⚠️ Deseja realmente excluir o município "${nomeMun}"?\nTodas as escolas pertencentes a este município serão excluídas!`)) return;
 
       try {
-        const res = await fetch(`/api/admin/municipios/${munId}`, { method: 'DELETE' });
-        if (res.ok) {
-          alert(`Município "${nomeMun}" excluído com sucesso!`);
-          recarregarDados();
-        } else {
-          alert("Erro ao excluir município.");
-        }
+        await api(`/api/admin/municipios/${munId}`, { method: 'DELETE' });
+        alert(`Município "${nomeMun}" excluído com sucesso!`);
+        recarregarDados();
       } catch (err) {
-        alert("Erro na requisição: " + err);
+        alert("Erro ao excluir município: " + err.message);
       }
     }
 
     async function excluirAlunoPainel(id, nome) {
       if (!confirm(`Deseja realmente excluir o aluno "${nome}"?`)) return;
       try {
-        const res = await fetch(`/api/admin/alunos/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          alert(`Aluno "${nome}" foi excluído com sucesso!`);
-          carregarSalasEscola(escolaAtualId);
-          recarregarDados();
-        }
+        await api(`/api/admin/alunos/${id}`, { method: 'DELETE' });
+        alert(`Aluno "${nome}" foi excluído com sucesso!`);
+        recarregarDados();
       } catch (err) {
-        alert("Erro ao excluir aluno: " + err);
+        alert("Erro ao excluir aluno: " + err.message);
       }
     }
 
-    /* CADASTROS */
+    /* CADASTROS (só mostram "sucesso" se o servidor realmente salvou) */
     async function cadastrarMunicipio() {
-      const nome = document.getElementById('cadMunNome').value;
-      const uf = document.getElementById('cadMunUf').value;
-      const numeroConvenio = document.getElementById('cadMunConvenio').value;
+      const nome = document.getElementById('cadMunNome').value.trim();
+      const uf = document.getElementById('cadMunUf').value.trim();
+      const numeroConvenio = document.getElementById('cadMunConvenio').value.trim();
       const dataExp = document.getElementById('cadMunExpiracao').value;
       if (!nome) return alert("Digite o nome da cidade.");
 
-      await fetch('/api/admin/municipios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      try {
+        await enviarJson('/api/admin/municipios', 'POST', {
           nome,
           uf,
           numeroConvenio: numeroConvenio || null,
           dataExpiracaoContrato: dataExp ? new Date(dataExp).toISOString() : null
-        })
-      });
-      document.getElementById('cadMunNome').value = '';
-      document.getElementById('cadMunConvenio').value = '';
-      document.getElementById('cadMunExpiracao').value = '';
-      alert("Prefeitura / Município cadastrado com sucesso!");
-      recarregarDados();
+        });
+        document.getElementById('cadMunNome').value = '';
+        document.getElementById('cadMunConvenio').value = '';
+        document.getElementById('cadMunExpiracao').value = '';
+        alert("Prefeitura / Município cadastrado com sucesso!");
+        recarregarDados();
+      } catch (err) {
+        alert("Não foi possível cadastrar o município: " + err.message);
+      }
     }
 
     async function cadastrarEscola() {
       const municipioId = document.getElementById('cadEscolaMun').value;
-      const nome = document.getElementById('cadEscolaNome').value;
-      const tokenAcesso = document.getElementById('cadEscolaToken').value;
+      const nome = document.getElementById('cadEscolaNome').value.trim();
+      const tokenAcesso = document.getElementById('cadEscolaToken').value.trim();
+      if (!municipioId) return alert("Cadastre uma prefeitura / município primeiro.");
       if (!nome) return alert("Digite o nome da escola.");
 
-      const res = await fetch('/api/admin/escolas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ municipioId, nome, tokenAcesso })
-      });
-      const escola = await res.json();
-      document.getElementById('cadEscolaNome').value = '';
-      document.getElementById('cadEscolaToken').value = '';
-      alert(`Escola salva!\nToken gerado para o jogo .exe: ${escola.tokenAcesso}`);
-      recarregarDados();
+      try {
+        const escola = await enviarJson('/api/admin/escolas', 'POST', { municipioId, nome, tokenAcesso: tokenAcesso || null });
+        document.getElementById('cadEscolaNome').value = '';
+        document.getElementById('cadEscolaToken').value = '';
+        alert(`Escola salva!\nToken para colocar no config_escola.json do jogo: ${escola.tokenAcesso}`);
+        escolaAtualId = escola.id;
+        salaSelecionadaId = null;
+        recarregarDados();
+      } catch (err) {
+        alert("Não foi possível cadastrar a escola: " + err.message);
+      }
     }
 
     async function cadastrarTurma() {
       const escolaId = document.getElementById('cadTurmaEscola').value;
-      const nome = document.getElementById('cadTurmaNome').value;
-      const nomeProfessor = document.getElementById('cadTurmaProfNome').value;
-      const loginProfessor = document.getElementById('cadTurmaProfLogin').value;
-      const senhaProfessor = document.getElementById('cadTurmaProfSenha').value;
+      const nome = document.getElementById('cadTurmaNome').value.trim();
+      const nomeProfessor = document.getElementById('cadTurmaProfNome').value.trim();
+      const loginProfessor = document.getElementById('cadTurmaProfLogin').value.trim();
+      const senhaProfessor = document.getElementById('cadTurmaProfSenha').value.trim();
 
+      if (!escolaId) return alert("Cadastre uma escola primeiro.");
       if (!nome) return alert("Digite o nome da sala/turma.");
 
-      await fetch('/api/admin/turmas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      try {
+        const turma = await enviarJson('/api/admin/turmas', 'POST', {
           escolaId,
           nome,
           nomeProfessor: nomeProfessor || null,
           loginProfessor: loginProfessor || null,
           senhaProfessor: senhaProfessor || null
-        })
-      });
-      document.getElementById('cadTurmaNome').value = '';
-      document.getElementById('cadTurmaProfNome').value = '';
-      document.getElementById('cadTurmaProfLogin').value = '';
-      document.getElementById('cadTurmaProfSenha').value = '';
-      alert("Sala e Professor cadastrados com sucesso!");
-      recarregarDados();
+        });
+        document.getElementById('cadTurmaNome').value = '';
+        document.getElementById('cadTurmaProfNome').value = '';
+        document.getElementById('cadTurmaProfLogin').value = '';
+        document.getElementById('cadTurmaProfSenha').value = '';
+        alert("Sala e Professor cadastrados com sucesso!");
+        escolaAtualId = escolaId;
+        salaSelecionadaId = turma.id;
+        recarregarDados();
+      } catch (err) {
+        alert("Não foi possível cadastrar a sala: " + err.message);
+      }
     }
 
     async function cadastrarAluno() {
       const turmaId = document.getElementById('cadAlunoTurma').value;
-      const nomeCompleto = document.getElementById('cadAlunoNome').value;
-      const nomeJogo = document.getElementById('cadAlunoJogo').value;
+      const nomeCompleto = document.getElementById('cadAlunoNome').value.trim();
+      const nomeJogo = document.getElementById('cadAlunoJogo').value.trim();
+      if (!turmaId) return alert("Escolha uma sala. (As salas listadas são da escola selecionada na aba \"Desempenho Geral por Sala\".)");
       if (!nomeCompleto) return alert("Digite o nome completo do aluno.");
 
-      await fetch('/api/admin/alunos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turmaId, nomeCompleto, nomeJogo })
-      });
-      document.getElementById('cadAlunoNome').value = '';
-      document.getElementById('cadAlunoJogo').value = '';
-      alert("Aluno cadastrado com sucesso!");
-      recarregarDados();
+      try {
+        await enviarJson('/api/admin/alunos', 'POST', { turmaId, nomeCompleto, nomeJogo: nomeJogo || null });
+        document.getElementById('cadAlunoNome').value = '';
+        document.getElementById('cadAlunoJogo').value = '';
+        alert("Aluno cadastrado com sucesso!");
+        salaSelecionadaId = turmaId;
+        recarregarDados();
+      } catch (err) {
+        alert("Não foi possível cadastrar o aluno: " + err.message);
+      }
     }
 
     function abrirModalProfessor(turmaId, turmaNome, profNome, profLogin) {
@@ -860,26 +975,19 @@
       }
 
       try {
-        const res = await fetch(`/api/admin/turmas/${turmaId}/professor`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nomeProfessor, loginProfessor, senhaProfessor })
-        });
-
-        if (res.ok) {
-          alert("Credenciais do Professor salvas com sucesso!");
-          fecharModalProfessor();
-          carregarSalasEscola(escolaAtualId);
-          recarregarDados();
-        } else {
-          alert("Erro ao salvar dados do professor.");
-        }
+        await enviarJson(`/api/admin/turmas/${turmaId}/professor`, 'PUT', { nomeProfessor, loginProfessor, senhaProfessor });
+        alert("Credenciais do Professor salvas com sucesso!");
+        fecharModalProfessor();
+        recarregarDados();
       } catch (e) {
-        alert("Erro na requisição: " + e);
+        alert("Erro ao salvar dados do professor: " + e.message);
       }
     }
 
-    window.onload = recarregarDados;
+    window.onload = () => {
+      atualizarStatusServidor();
+      recarregarDados();
+    };
   </script>
 
   <!-- MODAL EDITAR PROFESSOR DA SALA -->

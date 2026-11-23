@@ -228,7 +228,7 @@ public class AdminController : ControllerBase
         };
         _db.Municipios.Add(mun);
         await _db.SaveChangesAsync();
-        return Ok(mun);
+        return Ok(new { mun.Id, mun.Nome, mun.UF, mun.DataExpiracaoContrato, mun.NumeroConvenio, mun.DataCriacao });
     }
 
     [HttpPut("municipios/{municipioId:guid}/contrato")]
@@ -243,7 +243,7 @@ public class AdminController : ControllerBase
         if (!string.IsNullOrWhiteSpace(dto.UF)) mun.UF = dto.UF.Trim().ToUpper();
 
         await _db.SaveChangesAsync();
-        return Ok(mun);
+        return Ok(new { mun.Id, mun.Nome, mun.UF, mun.DataExpiracaoContrato, mun.NumeroConvenio, mun.DataCriacao });
     }
 
     [HttpDelete("municipios/{municipioId:guid}")]
@@ -288,6 +288,9 @@ public class AdminController : ControllerBase
             ? dto.TokenAcesso.Trim().ToUpper()
             : $"ESC-{mun.UF}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
 
+        if (await _db.Escolas.AnyAsync(e => e.TokenAcesso.ToUpper() == token))
+            return Conflict($"Já existe uma escola com o token '{token}'. Escolha outro token.");
+
         var escola = new Escola
         {
             Id = Guid.NewGuid(),
@@ -302,7 +305,7 @@ public class AdminController : ControllerBase
         _db.Escolas.Add(escola);
         await _db.SaveChangesAsync();
 
-        return Ok(escola);
+        return Ok(new { escola.Id, escola.Nome, escola.TokenAcesso, escola.MunicipioId, escola.CodigoInep, escola.Ativa });
     }
 
     /// <summary>
@@ -341,6 +344,11 @@ public class AdminController : ControllerBase
         var escola = await _db.Escolas.FindAsync(dto.EscolaId);
         if (escola == null) return NotFound("Escola não encontrada.");
 
+        string nomeNovo = dto.Nome.Trim();
+        var nomesExistentes = await _db.Turmas.Where(t => t.EscolaId == escola.Id).Select(t => t.Nome).ToListAsync();
+        if (nomesExistentes.Any(n => string.Equals(n.Trim(), nomeNovo, StringComparison.OrdinalIgnoreCase)))
+            return Conflict($"A escola já possui uma sala chamada '{nomeNovo}'.");
+
         var turma = new Turma
         {
             Id = Guid.NewGuid(),
@@ -354,7 +362,7 @@ public class AdminController : ControllerBase
 
         _db.Turmas.Add(turma);
         await _db.SaveChangesAsync();
-        return Ok(turma);
+        return Ok(new { turma.Id, turma.Nome, turma.EscolaId, turma.AnoLetivo, turma.NomeProfessor, turma.LoginProfessor });
     }
 
     /// <summary>
@@ -371,7 +379,7 @@ public class AdminController : ControllerBase
         if (!string.IsNullOrWhiteSpace(dto.SenhaProfessor)) turma.SenhaProfessor = dto.SenhaProfessor.Trim();
 
         await _db.SaveChangesAsync();
-        return Ok(turma);
+        return Ok(new { turma.Id, turma.Nome, turma.EscolaId, turma.AnoLetivo, turma.NomeProfessor, turma.LoginProfessor });
     }
 
     /// <summary>
@@ -405,19 +413,29 @@ public class AdminController : ControllerBase
         var turma = await _db.Turmas.FindAsync(dto.TurmaId);
         if (turma == null) return NotFound("Turma não encontrada.");
 
+        string nomeJogo = string.IsNullOrWhiteSpace(dto.NomeJogo) ? dto.NomeCompleto.Trim().Split(' ')[0] : dto.NomeJogo.Trim();
+
+        // O jogo identifica o aluno pelo "nome no jogo": dois alunos com o mesmo nome na mesma escola se misturariam.
+        var nomesNaEscola = await _db.Alunos
+            .Where(a => a.Turma!.EscolaId == turma.EscolaId)
+            .Select(a => a.NomeJogo)
+            .ToListAsync();
+        if (nomesNaEscola.Any(n => string.Equals(n?.Trim(), nomeJogo, StringComparison.OrdinalIgnoreCase)))
+            return Conflict($"Já existe um aluno chamado '{nomeJogo}' no jogo nesta escola. Use um apelido diferente (ex: {nomeJogo} {turma.Nome}).");
+
         var aluno = new Aluno
         {
             Id = Guid.NewGuid(),
             TurmaId = turma.Id,
             NomeCompleto = dto.NomeCompleto.Trim(),
-            NomeJogo = string.IsNullOrWhiteSpace(dto.NomeJogo) ? dto.NomeCompleto.Trim().Split(' ')[0] : dto.NomeJogo.Trim(),
+            NomeJogo = nomeJogo,
             Ativo = true,
             DataCriacao = DateTime.UtcNow
         };
 
         _db.Alunos.Add(aluno);
         await _db.SaveChangesAsync();
-        return Ok(aluno);
+        return Ok(new { aluno.Id, aluno.NomeCompleto, aluno.NomeJogo, aluno.TurmaId, aluno.Ativo });
     }
 
     [HttpDelete("alunos/{alunoId:guid}")]

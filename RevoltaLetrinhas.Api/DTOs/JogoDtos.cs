@@ -15,9 +15,23 @@ public class RegistrarProgressoDto
 
 public class CriarAlunoDto
 {
-    public Guid TurmaId { get; set; }
+    // string (e não Guid) de propósito: o jogo envia "turmaId":"" quando não sabe o Id da sala,
+    // e um Guid vazio fazia o servidor recusar TODO cadastro de aluno vindo do jogo (erro 400).
+    public string? TurmaId { get; set; }
+    public string? NomeTurma { get; set; }
     public string NomeCompleto { get; set; } = string.Empty;
     public string? NomeJogo { get; set; }
+}
+
+public class CriarTurmaJogoDto
+{
+    public string NomeTurma { get; set; } = string.Empty;
+}
+
+public class AtualizarTurmaAlunoDto
+{
+    public string NomeAluno { get; set; } = string.Empty;
+    public string NomeTurma { get; set; } = string.Empty;
 }
 
 public class ExcluirAlunoDto

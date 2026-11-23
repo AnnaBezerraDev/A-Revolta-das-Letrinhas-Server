@@ -13,11 +13,76 @@ public class JogoController : ControllerBase
     private readonly AppDbContext _db;
     private readonly ILogger<JogoController> _logger;
 
+    // Serializa cadastros de alunos/salas vindos do jogo para que duas requisições simultâneas
+    // (ex.: "criar aluno" + "definir sala") não criem o mesmo aluno duas vezes.
+    private static readonly SemaphoreSlim _travaCadastro = new(1, 1);
+
     public JogoController(AppDbContext db, ILogger<JogoController> logger)
     {
         _db = db;
         _logger = logger;
     }
+
+    // =====================================================================
+    // AUXILIARES
+    // =====================================================================
+
+    private static string? NormalizarToken(string? tokenHeader, string? tokenQuery)
+    {
+        var t = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : tokenQuery;
+        return string.IsNullOrWhiteSpace(t) ? null : t.Trim().ToUpperInvariant();
+    }
+
+    private static bool MesmoNome(string? a, string? b) =>
+        string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static Aluno? AcharAlunoPorNome(Escola escola, string nome)
+    {
+        var candidatos = escola.Turmas
+            .SelectMany(t => t.Alunos)
+            .Where(a => MesmoNome(a.NomeJogo, nome) || MesmoNome(a.NomeCompleto, nome))
+            .ToList();
+
+        // Prefere um aluno ativo, se houver mais de um com o mesmo nome
+        return candidatos.FirstOrDefault(a => a.Ativo) ?? candidatos.FirstOrDefault();
+    }
+
+    private Turma ObterOuCriarTurma(Escola escola, string nomeTurma)
+    {
+        var turma = escola.Turmas.FirstOrDefault(t => MesmoNome(t.Nome, nomeTurma));
+        if (turma == null)
+        {
+            turma = new Turma
+            {
+                Id = Guid.NewGuid(),
+                EscolaId = escola.Id,
+                Nome = nomeTurma.Trim(),
+                AnoLetivo = DateTime.UtcNow.Year
+            };
+            _db.Turmas.Add(turma);
+            escola.Turmas.Add(turma);
+        }
+        return turma;
+    }
+
+    private Task<Escola?> BuscarEscolaComAlunos(string token) =>
+        _db.Escolas
+            .Include(e => e.Turmas)
+                .ThenInclude(t => t.Alunos)
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == token && e.Ativa);
+
+    private static AlunoResumoDto ParaResumo(Aluno aluno, Turma turma) => new()
+    {
+        Id = aluno.Id,
+        NomeCompleto = aluno.NomeCompleto,
+        NomeJogo = string.IsNullOrWhiteSpace(aluno.NomeJogo) ? aluno.NomeCompleto : aluno.NomeJogo,
+        TurmaId = turma.Id,
+        TurmaNome = turma.Nome
+    };
+
+    // =====================================================================
+    // ATUALIZAÇÃO DO JOGO (PATCH)
+    // =====================================================================
 
     /// <summary>
     /// Consulta a versão mais recente do jogo e se há atualizações para as escolas.
@@ -74,6 +139,10 @@ public class JogoController : ControllerBase
         return Ok(new { mensagem = "Patch publicado com sucesso! Todas as escolas atualizarão automaticamente ao abrir o jogo." });
     }
 
+    // =====================================================================
+    // ESCOLA
+    // =====================================================================
+
     /// <summary>
     /// Retorna todas as escolas cadastradas para que o professor possa selecionar no jogo se necessário.
     /// </summary>
@@ -106,8 +175,8 @@ public class JogoController : ControllerBase
     [HttpGet("conectar")]
     public async Task<IActionResult> ConectarEscola([FromQuery] string? token, [FromHeader(Name = "X-Escola-Token")] string? tokenHeader)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo))
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null)
         {
             return BadRequest(new { erro = "Token da escola não informado." });
         }
@@ -116,7 +185,7 @@ public class JogoController : ControllerBase
             .Include(e => e.Municipio)
             .Include(e => e.Turmas)
                 .ThenInclude(t => t.Alunos.Where(a => a.Ativo))
-            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
 
         if (escola == null)
         {
@@ -140,7 +209,7 @@ public class JogoController : ControllerBase
             DiasRestantesContrato = diasRestantes,
             ContratoValido = contratoValido,
             TokenAcesso = escola.TokenAcesso,
-            Turmas = escola.Turmas.Select(t => new TurmaComAlunosDto
+            Turmas = escola.Turmas.OrderBy(t => t.Nome).Select(t => new TurmaComAlunosDto
             {
                 TurmaId = t.Id,
                 Nome = t.Nome,
@@ -169,18 +238,14 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromBody] LoginProfessorDto dto)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token da escola não informado.");
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token da escola não informado.");
 
-        var escola = await _db.Escolas
-            .Include(e => e.Turmas)
-                .ThenInclude(t => t.Alunos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
-
+        var escola = await BuscarEscolaComAlunos(tokenEfetivo);
         if (escola == null) return NotFound("Escola não encontrada.");
 
-        string user = dto.Login.Trim().ToLower();
-        string pass = dto.Senha.Trim();
+        string user = (dto.Login ?? "").Trim().ToLower();
+        string pass = (dto.Senha ?? "").Trim();
 
         // 1. Verifica se é o admin padrão da escola
         if (user == "professor" && pass == "1234")
@@ -215,6 +280,173 @@ public class JogoController : ControllerBase
         return Unauthorized(new { sucesso = false, erro = "Usuário ou senha do professor incorretos." });
     }
 
+    // =====================================================================
+    // SALAS E ALUNOS (CADASTROS FEITOS DENTRO DO JOGO)
+    // =====================================================================
+
+    /// <summary>
+    /// Cadastra uma sala/turma criada dentro do jogo. Se já existir uma sala com o mesmo nome, apenas a devolve.
+    /// </summary>
+    [HttpPost("criar-turma")]
+    public async Task<IActionResult> CriarTurma(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] CriarTurmaJogoDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        if (string.IsNullOrWhiteSpace(dto.NomeTurma)) return BadRequest("Nome da sala é obrigatório.");
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return Unauthorized("Token da escola inválido.");
+
+            bool jaExistia = escola.Turmas.Any(t => MesmoNome(t.Nome, dto.NomeTurma));
+            var turma = ObterOuCriarTurma(escola, dto.NomeTurma);
+            await _db.SaveChangesAsync();
+
+            if (!jaExistia) _logger.LogInformation("Sala '{Sala}' criada pelo jogo na escola {Escola}", turma.Nome, escola.Nome);
+
+            return Ok(new { turmaId = turma.Id, nome = turma.Nome, criada = !jaExistia });
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
+    }
+
+    /// <summary>
+    /// Cadastra um aluno criado no jogo. Se já existir um aluno com o mesmo nome nesta escola,
+    /// devolve o aluno existente em vez de criar uma cópia duplicada.
+    /// </summary>
+    [HttpPost("criar-aluno")]
+    public async Task<IActionResult> CriarAluno(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] CriarAlunoDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        if (string.IsNullOrWhiteSpace(dto.NomeCompleto)) return BadRequest("Nome do aluno é obrigatório.");
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return Unauthorized("Token da escola inválido.");
+
+            string nomeJogo = string.IsNullOrWhiteSpace(dto.NomeJogo) ? dto.NomeCompleto.Trim() : dto.NomeJogo.Trim();
+
+            // 1. Já existe? Devolve o mesmo aluno (evita duplicados quando o jogo reenvia o cadastro)
+            var existente = AcharAlunoPorNome(escola, nomeJogo) ?? AcharAlunoPorNome(escola, dto.NomeCompleto);
+            if (existente != null)
+            {
+                if (!existente.Ativo)
+                {
+                    existente.Ativo = true;
+                    await _db.SaveChangesAsync();
+                }
+                var turmaExistente = escola.Turmas.First(t => t.Id == existente.TurmaId);
+                return Ok(ParaResumo(existente, turmaExistente));
+            }
+
+            // 2. Descobre a turma: por Id, por nome (criando se preciso) ou a primeira da escola
+            Turma? turma = null;
+            if (Guid.TryParse(dto.TurmaId, out var turmaIdInformado) && turmaIdInformado != Guid.Empty)
+            {
+                turma = escola.Turmas.FirstOrDefault(t => t.Id == turmaIdInformado);
+            }
+            if (turma == null && !string.IsNullOrWhiteSpace(dto.NomeTurma))
+            {
+                turma = ObterOuCriarTurma(escola, dto.NomeTurma);
+            }
+            turma ??= escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault() ?? ObterOuCriarTurma(escola, "1º Ano A");
+
+            var novoAluno = new Aluno
+            {
+                Id = Guid.NewGuid(),
+                TurmaId = turma.Id,
+                NomeCompleto = dto.NomeCompleto.Trim(),
+                NomeJogo = nomeJogo,
+                Ativo = true,
+                DataCriacao = DateTime.UtcNow
+            };
+            _db.Alunos.Add(novoAluno);
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("Aluno '{Aluno}' criado pelo jogo na sala '{Sala}' da escola {Escola}", nomeJogo, turma.Nome, escola.Nome);
+            return Ok(ParaResumo(novoAluno, turma));
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
+    }
+
+    /// <summary>
+    /// Define a sala/turma de um aluno a partir do jogo.
+    /// Se o aluno ainda não existir no servidor, ele é cadastrado já nessa sala.
+    /// </summary>
+    [HttpPost("atualizar-turma-aluno")]
+    public async Task<IActionResult> AtualizarTurmaAluno(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] AtualizarTurmaAlunoDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        if (string.IsNullOrWhiteSpace(dto.NomeAluno) || string.IsNullOrWhiteSpace(dto.NomeTurma))
+            return BadRequest("Nome do aluno e da sala são obrigatórios.");
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return Unauthorized("Token da escola inválido.");
+
+            var turmaDestino = ObterOuCriarTurma(escola, dto.NomeTurma);
+            var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+
+            if (aluno == null)
+            {
+                aluno = new Aluno
+                {
+                    Id = Guid.NewGuid(),
+                    TurmaId = turmaDestino.Id,
+                    NomeCompleto = dto.NomeAluno.Trim(),
+                    NomeJogo = dto.NomeAluno.Trim(),
+                    Ativo = true,
+                    DataCriacao = DateTime.UtcNow
+                };
+                _db.Alunos.Add(aluno);
+            }
+            else
+            {
+                aluno.TurmaId = turmaDestino.Id;
+                aluno.Ativo = true;
+            }
+
+            await _db.SaveChangesAsync();
+
+            var resumo = ParaResumo(aluno, turmaDestino);
+            return Ok(new
+            {
+                id = resumo.Id,
+                nomeCompleto = resumo.NomeCompleto,
+                nomeJogo = resumo.NomeJogo,
+                turmaId = resumo.TurmaId,
+                turmaNome = resumo.TurmaNome,
+                mensagem = $"Aluno '{resumo.NomeJogo}' está na sala '{turmaDestino.Nome}'."
+            });
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
+    }
+
     /// <summary>
     /// Chamado quando o aluno ou professor exclui um perfil no jogo .exe.
     /// Exclui o aluno e seu progresso do banco de dados no servidor!
@@ -225,33 +457,41 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromBody] ExcluirAlunoDto dto)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token obrigatório.");
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
 
-        var escola = await _db.Escolas
-            .Include(e => e.Turmas)
-                .ThenInclude(t => t.Alunos)
-                    .ThenInclude(a => a.Progressos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
-
-        if (escola == null) return Unauthorized("Escola não encontrada.");
-
-        var aluno = escola.Turmas
-            .SelectMany(t => t.Alunos)
-            .FirstOrDefault(a => string.Equals(a.NomeJogo, dto.NomeAluno, StringComparison.OrdinalIgnoreCase) ||
-                                 string.Equals(a.NomeCompleto, dto.NomeAluno, StringComparison.OrdinalIgnoreCase));
-
-        if (aluno != null)
+        await _travaCadastro.WaitAsync();
+        try
         {
+            var escola = await _db.Escolas
+                .Include(e => e.Turmas)
+                    .ThenInclude(t => t.Alunos)
+                        .ThenInclude(a => a.Progressos)
+                .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
+
+            if (escola == null) return Unauthorized("Escola não encontrada.");
+
+            var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+            if (aluno == null)
+            {
+                return NotFound(new { erro = $"Aluno '{dto.NomeAluno}' não encontrado nesta escola." });
+            }
+
             _db.ProgressoFases.RemoveRange(aluno.Progressos);
             _db.Alunos.Remove(aluno);
             await _db.SaveChangesAsync();
             _logger.LogInformation("Aluno {Nome} excluído da escola {Escola}", dto.NomeAluno, escola.Nome);
             return Ok(new { mensagem = $"Aluno '{dto.NomeAluno}' excluído do servidor com sucesso!" });
         }
-
-        return NotFound(new { erro = $"Aluno '{dto.NomeAluno}' não encontrado nesta escola." });
+        finally
+        {
+            _travaCadastro.Release();
+        }
     }
+
+    // =====================================================================
+    // PROGRESSO
+    // =====================================================================
 
     /// <summary>
     /// Chamado pelo jogo .exe quando o aluno completa uma fase.
@@ -262,10 +502,10 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromBody] RegistrarProgressoDto dto)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token obrigatório.");
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
 
-        var escola = await _db.Escolas.FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+        var escola = await _db.Escolas.FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
         if (escola == null) return Unauthorized("Token da escola inválido.");
 
         var aluno = await _db.Alunos
@@ -313,52 +553,6 @@ public class JogoController : ControllerBase
     }
 
     /// <summary>
-    /// Cadastra um novo aluno diretamente do jogo (quando cria perfil).
-    /// </summary>
-    [HttpPost("criar-aluno")]
-    public async Task<IActionResult> CriarAluno(
-        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
-        [FromQuery] string? token,
-        [FromBody] CriarAlunoDto dto)
-    {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        var escola = await _db.Escolas.Include(e => e.Turmas).FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
-        if (escola == null) return Unauthorized("Token da escola inválido.");
-
-        var turma = (dto.TurmaId != Guid.Empty ? escola.Turmas.FirstOrDefault(t => t.Id == dto.TurmaId) : null)
-                    ?? escola.Turmas.FirstOrDefault();
-
-        if (turma == null)
-        {
-            turma = new Turma { Id = Guid.NewGuid(), EscolaId = escola.Id, Nome = "1º Ano A", AnoLetivo = DateTime.UtcNow.Year };
-            _db.Turmas.Add(turma);
-            await _db.SaveChangesAsync();
-        }
-
-        var novoAluno = new Aluno
-        {
-            Id = Guid.NewGuid(),
-            TurmaId = turma.Id,
-            NomeCompleto = dto.NomeCompleto.Trim(),
-            NomeJogo = string.IsNullOrWhiteSpace(dto.NomeJogo) ? dto.NomeCompleto.Trim() : dto.NomeJogo.Trim(),
-            Ativo = true,
-            DataCriacao = DateTime.UtcNow
-        };
-
-        _db.Alunos.Add(novoAluno);
-        await _db.SaveChangesAsync();
-
-        return Ok(new AlunoResumoDto
-        {
-            Id = novoAluno.Id,
-            NomeCompleto = novoAluno.NomeCompleto,
-            NomeJogo = novoAluno.NomeJogo,
-            TurmaId = turma.Id,
-            TurmaNome = turma.Nome
-        });
-    }
-
-    /// <summary>
     /// Chamado pelo jogo .exe na Área do Professor para carregar o resumo de todas as salas/turmas e alunos daquela escola.
     /// </summary>
     [HttpGet("salas-resumo")]
@@ -366,15 +560,15 @@ public class JogoController : ControllerBase
         [FromQuery] string? token,
         [FromHeader(Name = "X-Escola-Token")] string? tokenHeader)
     {
-        var tokenEfetivo = !string.IsNullOrWhiteSpace(tokenHeader) ? tokenHeader : token;
-        if (string.IsNullOrWhiteSpace(tokenEfetivo)) return BadRequest("Token obrigatório.");
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
 
         var escola = await _db.Escolas
             .Include(e => e.Municipio)
             .Include(e => e.Turmas)
                 .ThenInclude(t => t.Alunos)
                     .ThenInclude(a => a.Progressos)
-            .FirstOrDefaultAsync(e => e.TokenAcesso == tokenEfetivo && e.Ativa);
+            .FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo && e.Ativa);
 
         if (escola == null) return NotFound("Escola não encontrada com este token.");
 
@@ -388,7 +582,8 @@ public class JogoController : ControllerBase
             double somaEstrelas = 0;
             int alunosComFases = 0;
 
-            foreach (var aluno in turma.Alunos.Where(a => a.Ativo).OrderBy(a => a.NomeJogo))
+            var alunosAtivos = turma.Alunos.Where(a => a.Ativo).OrderBy(a => a.NomeJogo).ToList();
+            foreach (var aluno in alunosAtivos)
             {
                 var fasesPort = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Portugues");
                 var fasesMath = aluno.Progressos.Count(p => p.Concluida && p.Materia == "Matematica");
@@ -424,7 +619,7 @@ public class JogoController : ControllerBase
                 });
             }
 
-            int totalAlunos = turma.Alunos.Count;
+            int totalAlunos = alunosAtivos.Count;
             double taxaPort = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesPort) / (totalAlunos * 30) * 100, 1) : 0;
             double taxaMath = totalAlunos > 0 ? Math.Round((double)alunosDto.Sum(a => a.FasesMath) / (totalAlunos * 30) * 100, 1) : 0;
 
