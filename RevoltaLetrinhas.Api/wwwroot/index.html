@@ -203,6 +203,7 @@
           <option value="local">💻 Este computador (banco local de testes)</option>
         </select>
       </div>
+      <button id="btnSairAdmin" onclick="sairAdmin()" title="Esquecer a senha de administrador nesta aba" style="display:none; padding:3px 10px; border-radius:6px; border:none; font-size:12px; cursor:pointer;">🔒 Sair</button>
     </div>
   </header>
 
@@ -441,8 +442,82 @@
       API = modo === 'nuvem' ? URL_NUVEM : '';
       escolaAtualId = null;
       salaSelecionadaId = null;
+      aguardandoSenha = false;
+      fecharModalLogin();
+      atualizarBotaoSair();
       atualizarStatusServidor();
       recarregarDados();
+    }
+
+    /* =====================================================================
+       SENHA DO ADMINISTRADOR
+       As rotas /api/admin/* exigem a senha ADMIN_SENHA do servidor, enviada no
+       cabeçalho X-Admin-Senha. Ela fica guardada só nesta aba (sessionStorage):
+       fechar a aba ou clicar em "Sair" apaga a senha.
+       ===================================================================== */
+    const senhaEmMemoria = {};
+    let aguardandoSenha = false; // o servidor pediu a senha: pausa a atualização automática até a pessoa entrar
+
+    function chaveSenhaAdmin() {
+      return 'painel_senha_admin_' + ((API === URL_NUVEM || !PAINEL_LOCAL) ? 'nuvem' : 'local');
+    }
+
+    function lerSenhaAdmin() {
+      try { const s = sessionStorage.getItem(chaveSenhaAdmin()); if (s) return s; } catch (e) {}
+      return senhaEmMemoria[chaveSenhaAdmin()] || '';
+    }
+
+    function guardarSenhaAdmin(senha) {
+      senhaEmMemoria[chaveSenhaAdmin()] = senha;
+      try { sessionStorage.setItem(chaveSenhaAdmin(), senha); } catch (e) {}
+      aguardandoSenha = false;
+      atualizarBotaoSair();
+    }
+
+    function esquecerSenhaAdmin() {
+      delete senhaEmMemoria[chaveSenhaAdmin()];
+      try { sessionStorage.removeItem(chaveSenhaAdmin()); } catch (e) {}
+      atualizarBotaoSair();
+    }
+
+    function atualizarBotaoSair() {
+      document.getElementById('btnSairAdmin').style.display = lerSenhaAdmin() ? 'inline-block' : 'none';
+    }
+
+    function rotaDeAdmin(caminho) {
+      return caminho.startsWith('/api/admin/') || caminho.startsWith('/api/jogo/upload-patch');
+    }
+
+    function pedirSenhaAdmin(mensagemErro) {
+      const erro = document.getElementById('loginErro');
+      erro.innerText = mensagemErro || '';
+      erro.style.display = mensagemErro ? 'block' : 'none';
+      document.getElementById('loginServidor').innerText =
+        (API === URL_NUVEM || !PAINEL_LOCAL) ? 'NUVEM (api.kairosstudios.site)' : 'LOCAL (este computador)';
+      document.getElementById('modalLogin').style.display = 'flex';
+      const campo = document.getElementById('loginSenha');
+      campo.value = '';
+      setTimeout(() => campo.focus(), 0);
+    }
+
+    function fecharModalLogin() {
+      document.getElementById('modalLogin').style.display = 'none';
+    }
+
+    function entrarAdmin() {
+      const senha = document.getElementById('loginSenha').value.trim();
+      if (!senha) return pedirSenhaAdmin('Digite a senha.');
+      if (/[^\x20-\x7E]/.test(senha)) {
+        return pedirSenhaAdmin('A senha não pode ter acentos nem "ç". Use só letras sem acento, números e símbolos comuns (e configure a ADMIN_SENHA do servidor do mesmo jeito).');
+      }
+      guardarSenhaAdmin(senha);
+      fecharModalLogin();
+      recarregarDados();
+    }
+
+    function sairAdmin() {
+      esquecerSenhaAdmin();
+      location.reload(); // limpa da tela os dados que já tinham sido carregados
     }
 
     async function atualizarStatusServidor() {
@@ -479,17 +554,36 @@
       }
     }
 
-    /** fetch que lança erro com a mensagem do servidor quando a resposta não é 2xx */
-    async function api(caminho, opcoes) {
-      const res = await fetch(API + caminho, opcoes);
+    /** fetch que envia a senha de administrador nas rotas /api/admin/* e pede a senha de novo quando o servidor responde 401 */
+    async function requisicao(caminho, opcoes = {}) {
+      const headers = new Headers(opcoes.headers || {});
+      const senha = rotaDeAdmin(caminho) ? lerSenhaAdmin() : '';
+      if (senha) headers.set('X-Admin-Senha', senha);
+      const res = await fetch(API + caminho, { ...opcoes, headers });
+      if (res.status === 401 && rotaDeAdmin(caminho)) {
+        aguardandoSenha = true;
+        if (senha) esquecerSenhaAdmin();
+        pedirSenhaAdmin(senha ? '❌ Senha incorreta. Tente novamente.' : '');
+      }
+      return res;
+    }
+
+    /** Lança erro com a mensagem do servidor quando a resposta não é 2xx */
+    async function erroDaResposta(res) {
       const corpo = await res.text();
       let dados = null;
       try { dados = corpo ? JSON.parse(corpo) : null; } catch (e) { dados = corpo; }
-      if (!res.ok) {
-        let msg = typeof dados === 'string' ? dados : (dados && (dados.erro || dados.title)) || '';
-        throw new Error(`HTTP ${res.status}${msg ? ' - ' + msg : ''}`);
-      }
-      return dados;
+      let msg = typeof dados === 'string' ? dados : (dados && (dados.erro || dados.title)) || '';
+      const erro = new Error(`HTTP ${res.status}${msg ? ' - ' + msg : ''}`);
+      erro.status = res.status;
+      return erro;
+    }
+
+    async function api(caminho, opcoes) {
+      const res = await requisicao(caminho, opcoes);
+      if (!res.ok) throw await erroDaResposta(res);
+      const corpo = await res.text();
+      try { return corpo ? JSON.parse(corpo) : null; } catch (e) { return corpo; }
     }
 
     function enviarJson(caminho, metodo, corpo) {
@@ -507,12 +601,13 @@
     }
 
     function algumModalAberto() {
-      return document.getElementById('modalProfessor').style.display === 'flex';
+      return document.getElementById('modalProfessor').style.display === 'flex'
+          || document.getElementById('modalLogin').style.display === 'flex';
     }
 
     // Atualiza sozinho a cada 30s (somente na aba de salas, com a janela visível e sem modal aberto)
     setInterval(() => {
-      if (document.hidden || algumModalAberto()) return;
+      if (document.hidden || algumModalAberto() || aguardandoSenha) return;
       if (document.getElementById('abaSalas').style.display === 'none') return;
       recarregarDados(true);
     }, 30000);
@@ -552,7 +647,10 @@
         }
       } catch (err) {
         console.error("Erro ao carregar dados:", err);
-        if (!silencioso) {
+        if (err.status === 401) {
+          document.getElementById('containerSalas').innerHTML =
+            `<p style="color:#92400E;">🔒 Este painel exige a senha de administrador. <button class="btn btn-sm" onclick="pedirSenhaAdmin()">Entrar</button></p>`;
+        } else if (!silencioso) {
           document.getElementById('containerSalas').innerHTML = `<p style="color:red;">Erro ao carregar dados do servidor: ${esc(err.message)}</p>`;
         }
       }
@@ -795,9 +893,27 @@
     }
 
     /* DOWNLOAD DOS DADOS DA ESCOLA (CSV / EXCEL) */
-    function baixarDadosEscolaCsv() {
+    // Baixado via fetch (e não por link direto) para poder enviar a senha de administrador no cabeçalho.
+    async function baixarDadosEscolaCsv() {
       if (!escolaAtualId) return alert("Selecione uma escola primeiro.");
-      window.location.href = `${API}/api/admin/escola/${escolaAtualId}/exportar-csv`;
+      try {
+        const res = await requisicao(`/api/admin/escola/${escolaAtualId}/exportar-csv`);
+        if (!res.ok) throw await erroDaResposta(res);
+        const blob = await res.blob();
+        const escola = dadosGerais && dadosGerais.escolas.find(e => e.id === escolaAtualId);
+        const hoje = new Date();
+        const data = `${hoje.getFullYear()}${String(hoje.getMonth() + 1).padStart(2, '0')}${String(hoje.getDate()).padStart(2, '0')}`;
+        const nomeServidor = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = nomeServidor ? nomeServidor[1] : `Relatorio_Desempenho_${(escola ? escola.nome : 'Escola').replace(/\s+/g, '_')}_${data}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+      } catch (err) {
+        if (err.status !== 401) alert("Erro ao baixar os dados da escola: " + err.message);
+      }
     }
 
     /* EXCLUSÕES */
@@ -985,10 +1101,31 @@
     }
 
     window.onload = () => {
+      atualizarBotaoSair();
       atualizarStatusServidor();
       recarregarDados();
     };
   </script>
+
+  <!-- MODAL SENHA DO ADMINISTRADOR -->
+  <div id="modalLogin" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
+    <form onsubmit="event.preventDefault(); entrarAdmin();" style="background:white; border-radius:12px; width:420px; max-width:90%; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <h3 style="margin-top:0; color:#1E293B;">🔒 Acesso do administrador</h3>
+      <p style="font-size:13px; color:#475569; margin:8px 0 14px;">
+        Digite a senha de administrador do servidor <b id="loginServidor"></b>
+        (a variável <code>ADMIN_SENHA</code> configurada no servidor). Ela fica guardada só nesta aba do navegador.
+      </p>
+      <div id="loginErro" style="display:none; margin-bottom:12px; padding:8px 10px; border-radius:6px; background:#FEE2E2; color:#991B1B; font-size:13px; font-weight:600;"></div>
+      <div class="form-group" style="margin-bottom:16px;">
+        <label for="loginSenha" style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">Senha:</label>
+        <input type="password" id="loginSenha" autocomplete="current-password" style="width:100%; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;">
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button type="button" class="btn btn-secondary" style="background:#E2E8F0; color:#334155; padding:8px 16px; border-radius:6px;" onclick="fecharModalLogin()">Cancelar</button>
+        <button type="submit" class="btn btn-success" style="background:#16A34A; color:white; padding:8px 16px; border-radius:6px;">Entrar</button>
+      </div>
+    </form>
+  </div>
 
   <!-- MODAL EDITAR PROFESSOR DA SALA -->
   <div id="modalProfessor" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">

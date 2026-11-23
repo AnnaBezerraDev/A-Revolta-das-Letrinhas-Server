@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.DTOs;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Seguranca;
 
 namespace RevoltaLetrinhas.Api.Controllers;
 
@@ -123,8 +124,10 @@ public class JogoController : ControllerBase
 
     /// <summary>
     /// Permite que a desenvolvedora envie um novo patch Assembly-CSharp.dll para distribuir a todas as escolas.
+    /// Exige a senha de administrador (cabeçalho X-Admin-Senha = ADMIN_SENHA).
     /// </summary>
     [HttpPost("upload-patch")]
+    [ExigirSenhaAdmin]
     public async Task<IActionResult> UploadPatch(IFormFile arquivoPatch)
     {
         if (arquivoPatch == null || arquivoPatch.Length == 0) return BadRequest("Arquivo do patch não enviado.");

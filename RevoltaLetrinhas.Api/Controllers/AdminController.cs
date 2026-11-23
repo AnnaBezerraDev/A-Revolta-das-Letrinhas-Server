@@ -4,11 +4,16 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.DTOs;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Seguranca;
 
 namespace RevoltaLetrinhas.Api.Controllers;
 
+/// <summary>
+/// Rotas do painel de gestão. TODAS exigem a senha de administrador (cabeçalho X-Admin-Senha = ADMIN_SENHA).
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[ExigirSenhaAdmin]
 public class AdminController : ControllerBase
 {
     private readonly AppDbContext _db;
