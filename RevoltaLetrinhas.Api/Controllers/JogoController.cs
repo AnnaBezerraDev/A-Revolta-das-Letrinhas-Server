@@ -123,13 +123,13 @@ public class JogoController : ControllerBase
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
             // (e o versaoLocalCodigo do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.4",
-            versaoCodigo = 104,
+            versao = "1.0.5",
+            versaoCodigo = 105,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Licença por escola: limite de computadores usando o jogo ao mesmo tempo, limite de alunos e bloqueio automático quando o contrato da prefeitura vence."
+            novidades = "Aviso de atualização: o jogo mostra quando há uma versão nova, o andamento do download e permite reiniciar na hora para instalar."
         });
     }
 
@@ -147,23 +147,8 @@ public class JogoController : ControllerBase
         return PhysicalFile(patchPath, "application/octet-stream", "Assembly-CSharp.dll");
     }
 
-    /// <summary>
-    /// Permite que a desenvolvedora envie um novo patch Assembly-CSharp.dll para distribuir a todas as escolas.
-    /// </summary>
-    [HttpPost("upload-patch")]
-    public async Task<IActionResult> UploadPatch(IFormFile arquivoPatch)
-    {
-        if (arquivoPatch == null || arquivoPatch.Length == 0) return BadRequest("Arquivo do patch não enviado.");
-        var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "patch");
-        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-        var dest = Path.Combine(dir, "Assembly-CSharp.dll");
-        using (var stream = new FileStream(dest, FileMode.Create))
-        {
-            await arquivoPatch.CopyToAsync(stream);
-        }
-        _logger.LogInformation("Novo patch publicado com sucesso! Tamanho: {Bytes} bytes", arquivoPatch.Length);
-        return Ok(new { mensagem = "Patch publicado com sucesso! Todas as escolas atualizarão automaticamente ao abrir o jogo." });
-    }
+    // A antiga rota POST upload-patch foi removida: ela aceitava, sem senha, um arquivo que TODOS os
+    // computadores das escolas baixam e executam. O patch novo é publicado pelo GitHub (wwwroot/patch).
 
     // =====================================================================
     // ESCOLA

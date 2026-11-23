@@ -93,6 +93,28 @@ a fase; `/api/jogo/versao` = 1.0.3 (código 103) com o patch novo em `wwwroot/pa
 computadores) até receberem o patch; a regra roda no computador, então um jogo adulterado poderia ignorá-la
 (o servidor continua recusando os dados de escolas vencidas).
 
+## Versão 1.0.5 — aviso de atualização
+
+**Como funciona (`Assets/TelaAtualizacao.cs` + `ServicoNuvem.cs`)**
+- Ao abrir, o jogo consulta `/api/jogo/versao`. Havendo versão nova, aparece **"Nova versão disponível!"** com as
+  novidades, a barra de progresso e o tamanho baixado (o jogo fica bloqueado atrás do aviso enquanto baixa).
+- Terminado o download: **"Atualização pronta!"** com **Reiniciar agora** (fecha, instala e reabre sozinho em poucos
+  segundos) ou **Continuar jogando** (instala quando sair pelo botão de sair do jogo).
+- Se a atualização baixada não foi instalada (ex.: fechou pelo Alt+F4), na próxima abertura o aviso
+  "pronta" aparece de novo, sem baixar outra vez.
+- Falha no download ou arquivo incompleto (o tamanho é conferido): mensagem de erro e o jogo segue normalmente.
+- O script de instalação (`atualizar_jogo.bat`) agora espera o jogo fechar de verdade (tenta por até ~30 s),
+  é gravado sem BOM e usa o nome real do executável. No Editor da Unity a atualização automática fica desligada.
+- **Atenção:** o aviso só aparece a partir da 1.0.5. Quem está na 1.0.4 recebe a 1.0.5 do jeito antigo (em silêncio,
+  instalada ao sair pelo botão do jogo).
+
+**Servidor:** `versao` = 1.0.5 (código 105) com o patch novo. **Removida a rota `POST /api/jogo/upload-patch`**,
+que aceitava sem senha um arquivo que todos os computadores das escolas baixam e executam.
+
+**Testes (build isolado + servidor local):** download com progresso → "pronta" → *Continuar jogando*; abertura
+seguinte com o patch pendente → *Reiniciar agora* → jogo fechou, arquivo trocado (hash igual ao do servidor),
+jogo reabriu sozinho já sem aviso; arquivo defeituoso → mensagem de erro.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra
