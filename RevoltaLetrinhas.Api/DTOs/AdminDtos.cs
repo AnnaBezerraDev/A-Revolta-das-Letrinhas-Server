@@ -27,6 +27,11 @@ public class CriarEscolaDto
     public int? LimiteMaquinas { get; set; }
 }
 
+public class DefinirSenhaCoordenacaoDto
+{
+    public string? Senha { get; set; }
+}
+
 public class AtualizarLicencaEscolaDto
 {
     /// <summary>null = sem limite</summary>

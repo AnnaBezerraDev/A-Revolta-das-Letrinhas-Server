@@ -117,3 +117,23 @@ public class LoginProfessorDto
     public string Login { get; set; } = string.Empty;
     public string Senha { get; set; } = string.Empty;
 }
+
+public class ResgatarPersonagemDto
+{
+    public string NomeAluno { get; set; } = string.Empty;
+    public string Codigo { get; set; } = string.Empty;
+}
+
+public class HabilidadeItemDto
+{
+    public string Codigo { get; set; } = string.Empty;
+    public int Acertos { get; set; }
+    public int Erros { get; set; }
+}
+
+/// <summary>Acertos e erros por habilidade da BNCC de uma fase jogada (concluída ou não).</summary>
+public class HabilidadesLoteDto
+{
+    public string NomeAluno { get; set; } = string.Empty;
+    public List<HabilidadeItemDto> Itens { get; set; } = new();
+}

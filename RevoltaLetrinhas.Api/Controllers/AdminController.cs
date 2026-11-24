@@ -169,7 +169,8 @@ public class AdminController : ControllerBase
                 escola.LimiteMaquinas,
                 TotalAlunos = escola.Turmas.SelectMany(t => t.Alunos).Count(a => a.Ativo),
                 TotalProfessores = escola.Turmas.Count(t => !string.IsNullOrWhiteSpace(t.LoginProfessor)),
-                MaquinasEmUso = maquinasEmUso
+                MaquinasEmUso = maquinasEmUso,
+                TemSenhaCoordenacao = !string.IsNullOrEmpty(escola.SenhaCoordenacaoHash)
             },
             Salas = salasResumo
         });
@@ -217,6 +218,59 @@ public class AdminController : ControllerBase
         string filename = $"Relatorio_Desempenho_{escola.Nome.Replace(" ", "_")}_{DateTime.Now:yyyyMMdd}.csv";
 
         return File(buffer, "text/csv; charset=utf-8", filename);
+    }
+
+    // =====================================================================
+    // RELATÓRIO POR HABILIDADE DA BNCC
+    // =====================================================================
+
+    private async Task<(Escola? escola, List<(string Codigo, string Aluno, string Turma, int Acertos, int Erros)> dados)> DadosHabilidades(Guid escolaId)
+    {
+        var escola = await _db.Escolas.Include(e => e.Municipio).FirstOrDefaultAsync(e => e.Id == escolaId);
+        if (escola == null) return (null, new());
+        var linhas = await _db.AlunoHabilidades
+            .Where(h => h.Aluno!.Turma!.EscolaId == escolaId && h.Aluno.Ativo)
+            .Select(h => new { h.Codigo, Aluno = h.Aluno!.NomeJogo, Turma = h.Aluno.Turma!.Nome, h.Acertos, h.Erros })
+            .ToListAsync();
+        return (escola, linhas.Select(l => (l.Codigo, l.Aluno, l.Turma, l.Acertos, l.Erros)).ToList());
+    }
+
+    /// <summary>Habilidades da BNCC da escola: total e por sala (percentual de acerto e alunos que precisam de atenção).</summary>
+    [HttpGet("escola/{escolaId:guid}/habilidades")]
+    public async Task<IActionResult> HabilidadesEscola(Guid escolaId)
+    {
+        var (escola, dados) = await DadosHabilidades(escolaId);
+        if (escola == null) return NotFound("Escola não encontrada.");
+        var escolaTodo = RelatorioHabilidades.Montar(dados.Select(d => (d.Codigo, d.Aluno, d.Acertos, d.Erros)));
+        var porSala = dados.GroupBy(d => d.Turma).OrderBy(g => g.Key).Select(g => new
+        {
+            turma = g.Key,
+            habilidades = RelatorioHabilidades.Montar(g.Select(d => (d.Codigo, d.Aluno, d.Acertos, d.Erros)))
+        }).ToList();
+        return Ok(new { escola = escola.Nome, habilidades = escolaTodo, salas = porSala });
+    }
+
+    /// <summary>CSV (Excel) com uma linha por sala e habilidade.</summary>
+    [HttpGet("escola/{escolaId:guid}/habilidades-csv")]
+    public async Task<IActionResult> HabilidadesEscolaCsv(Guid escolaId)
+    {
+        var (escola, dados) = await DadosHabilidades(escolaId);
+        if (escola == null) return NotFound("Escola não encontrada.");
+        string mun = escola.Municipio != null ? $"{escola.Municipio.Nome}-{escola.Municipio.UF}" : "Geral";
+        static string C(string s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Municipio;Escola;Sala;Componente;Codigo BNCC;Habilidade;Ano BNCC;Respostas;Acertos;Erros;% Acerto;Alunos avaliados;Alunos que precisam de atencao");
+        foreach (var g in dados.GroupBy(d => d.Turma).OrderBy(g => g.Key))
+        {
+            foreach (var l in RelatorioHabilidades.Montar(g.Select(d => (d.Codigo, d.Aluno, d.Acertos, d.Erros))))
+            {
+                sb.AppendLine(string.Join(";", C(mun), C(escola.Nome), C(g.Key), C(l.Componente), l.Codigo, C(l.Descricao), C(l.Ano),
+                    l.Respostas, l.Acertos, l.Erros, l.Taxa, l.AlunosAvaliados, C(string.Join(", ", l.AlunosAtencao))));
+            }
+        }
+        byte[] buffer = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        return File(buffer, "text/csv; charset=utf-8", $"Habilidades_BNCC_{escola.Nome.Replace(" ", "_")}_{DateTime.Now:yyyyMMdd}.csv");
     }
 
     [HttpPost("municipios")]
@@ -506,6 +560,28 @@ public class AdminController : ControllerBase
             avisos.Add($"A escola já tem {professores} professores com login, acima do novo limite ({lp}). Novos logins ficam bloqueados.");
 
         return Ok(new { escola.Id, escola.LimiteAlunos, escola.LimiteProfessores, escola.LimiteMaquinas, escola.Ativa, avisos });
+    }
+
+    /// <summary>
+    /// Define (ou troca) a senha da coordenação da escola: login "coordenacao" no jogo, com acesso a todas as salas.
+    /// Guardada só como hash. A senha anterior deixa de valer na hora (com internet).
+    /// </summary>
+    [HttpPut("escolas/{escolaId:guid}/senha-coordenacao")]
+    public async Task<IActionResult> DefinirSenhaCoordenacao(Guid escolaId, [FromBody] DefinirSenhaCoordenacaoDto dto)
+    {
+        var escola = await _db.Escolas.FindAsync(escolaId);
+        if (escola == null) return NotFound("Escola não encontrada.");
+
+        string senha = (dto.Senha ?? "").Trim();
+        if (senha.Length < 8) return BadRequest("A senha da coordenação precisa ter pelo menos 8 caracteres.");
+        if (senha.Length > 100) return BadRequest("A senha da coordenação pode ter no máximo 100 caracteres.");
+        string[] obvias = { "12345678", "123456789", "1234567890", "87654321", "senha123", "senha1234", "password", "professor", "coordenacao", "escola123" };
+        if ((senha.All(char.IsDigit) && senha.Distinct().Count() <= 2) || obvias.Contains(senha.ToLowerInvariant()))
+            return BadRequest("Escolha uma senha menos óbvia (não use sequências como 12345678 ou 11111111).");
+
+        escola.SenhaCoordenacaoHash = SenhaHash.Gerar(senha);
+        await _db.SaveChangesAsync();
+        return Ok(new { escola.Id, temSenhaCoordenacao = true });
     }
 
     /// <summary>Computadores que já abriram o jogo com o token da escola.</summary>

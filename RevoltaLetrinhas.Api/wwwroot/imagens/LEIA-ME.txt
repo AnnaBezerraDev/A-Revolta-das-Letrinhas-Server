@@ -1,0 +1,3 @@
+Imagens das palavras e dos personagens de perfil: Noto Emoji (Google), versão v2.042,
+https://github.com/googlefonts/noto-emoji/tree/v2.042/png/128 — licença Apache 2.0 (arquivo LICENSE-noto-emoji.txt).
+Arquivos renomeados (palavras/<PALAVRA>.png e personagens/<código>.png); o desenho não foi alterado.

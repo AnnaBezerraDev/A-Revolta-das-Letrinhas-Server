@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RevoltaLetrinhas.Api.Data;
 using RevoltaLetrinhas.Api.DTOs;
 using RevoltaLetrinhas.Api.Models;
+using RevoltaLetrinhas.Api.Seguranca;
 using RevoltaLetrinhas.Api.Servicos;
 
 namespace RevoltaLetrinhas.Api.Controllers;
@@ -48,23 +49,18 @@ public class JogoController : ControllerBase
         return candidatos.FirstOrDefault(a => a.Ativo) ?? candidatos.FirstOrDefault();
     }
 
-    private Turma ObterOuCriarTurma(Escola escola, string nomeTurma)
+    /// <summary>
+    /// Sala da escola pelo nome. O jogo NÃO cria salas: elas são cadastradas só pelo administrador no painel
+    /// (antes, qualquer nome digitado no jogo virava uma sala nova no banco).
+    /// </summary>
+    private static Turma? AcharTurma(Escola escola, string? nomeTurma) =>
+        string.IsNullOrWhiteSpace(nomeTurma) ? null : escola.Turmas.FirstOrDefault(t => MesmoNome(t.Nome, nomeTurma));
+
+    private IActionResult SalaInexistente(string? nomeTurma) => Conflict(new
     {
-        var turma = escola.Turmas.FirstOrDefault(t => MesmoNome(t.Nome, nomeTurma));
-        if (turma == null)
-        {
-            turma = new Turma
-            {
-                Id = Guid.NewGuid(),
-                EscolaId = escola.Id,
-                Nome = nomeTurma.Trim(),
-                AnoLetivo = DateTime.UtcNow.Year
-            };
-            _db.Turmas.Add(turma);
-            escola.Turmas.Add(turma);
-        }
-        return turma;
-    }
+        codigo = "sala_inexistente",
+        erro = $"A sala '{nomeTurma}' não existe nesta escola. Novas salas são cadastradas pela administração no painel da escola."
+    });
 
     private Task<Escola?> BuscarEscolaComAlunos(string token) =>
         _db.Escolas
@@ -123,13 +119,13 @@ public class JogoController : ControllerBase
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
             // (e o VersaoCodigoDoBuild do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.7",
-            versaoCodigo = 107,
+            versao = "1.0.8",
+            versaoCodigo = 108,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Fases mais fáceis para o 1º e 2º ano: no Português, completar a vogal de palavras pequenas; na Matemática, somas com números de um algarismo."
+            novidades = "Resgate das Letrinhas e personagens de perfil; desenhos nas palavras; botão Ouvir e dicas; conteúdo do 2º e do 5º ano; relatório por habilidade da BNCC; acesso da coordenação com senha própria."
         });
     }
 
@@ -237,22 +233,10 @@ public class JogoController : ControllerBase
         string user = (dto.Login ?? "").Trim().ToLower();
         string pass = (dto.Senha ?? "").Trim();
 
-        // 1. Verifica se é o admin padrão da escola
-        if (user == "professor" && pass == "1234")
-        {
-            return Ok(new
-            {
-                sucesso = true,
-                tipo = "AdministradorEscola",
-                nome = "Professor(a) Geral",
-                turmaId = (Guid?)null,
-                turmaNome = "Todas as Salas"
-            });
-        }
-
-        // 2. Verifica se é um professor exclusivo cadastrado em alguma sala
+        // 1. Professor exclusivo cadastrado em alguma sala
         var turmaDoProf = escola.Turmas.FirstOrDefault(t =>
             string.Equals(t.LoginProfessor, user, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrEmpty(t.SenhaProfessor) &&
             t.SenhaProfessor == pass);
 
         if (turmaDoProf != null)
@@ -267,6 +251,37 @@ public class JogoController : ControllerBase
             });
         }
 
+        // 2. Coordenação (todas as salas). A senha é definida por escola no painel de administração
+        //    e guardada só como hash. Não existe mais senha padrão: antes "professor / 1234" valia em todas as escolas.
+        if (user is "coordenacao" or "coordenação" or "professor")
+        {
+            if (string.IsNullOrEmpty(escola.SenhaCoordenacaoHash))
+            {
+                await Task.Delay(500);
+                return Unauthorized(new
+                {
+                    sucesso = false,
+                    codigo = "coordenacao_sem_senha",
+                    erro = "A senha da coordenação desta escola ainda não foi definida. Peça à administração para defini-la no painel (Licença da escola)."
+                });
+            }
+
+            if (SenhaHash.Confere(pass, escola.SenhaCoordenacaoHash))
+            {
+                return Ok(new
+                {
+                    sucesso = true,
+                    tipo = "AdministradorEscola",
+                    nome = "Coordenação",
+                    turmaId = (Guid?)null,
+                    turmaNome = "Todas as Salas"
+                });
+            }
+        }
+
+        _logger.LogWarning("Login de professor recusado na escola {Escola} (usuário '{Usuario}') vindo de {Ip}.",
+            escola.Nome, user, HttpContext.Connection.RemoteIpAddress);
+        await Task.Delay(500); // atrasa tentativas de adivinhar a senha
         return Unauthorized(new { sucesso = false, erro = "Usuário ou senha do professor incorretos." });
     }
 
@@ -294,13 +309,11 @@ public class JogoController : ControllerBase
             if (escola == null) return Unauthorized("Token da escola inválido.");
             if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
 
-            bool jaExistia = escola.Turmas.Any(t => MesmoNome(t.Nome, dto.NomeTurma));
-            var turma = ObterOuCriarTurma(escola, dto.NomeTurma);
-            await _db.SaveChangesAsync();
-
-            if (!jaExistia) _logger.LogInformation("Sala '{Sala}' criada pelo jogo na escola {Escola}", turma.Nome, escola.Nome);
-
-            return Ok(new { turmaId = turma.Id, nome = turma.Nome, criada = !jaExistia });
+            // Desde a 1.0.8 só o administrador cria salas (painel). Versões antigas do jogo ainda chamam esta rota:
+            // se a sala já existe, devolve a mesma; se não existe, recusa.
+            var turma = AcharTurma(escola, dto.NomeTurma);
+            if (turma == null) return SalaInexistente(dto.NomeTurma);
+            return Ok(new { turmaId = turma.Id, nome = turma.Nome, criada = false });
         }
         finally
         {
@@ -348,7 +361,7 @@ public class JogoController : ControllerBase
             // 2. Aluno novo: respeita o limite de alunos da licença
             if (BloqueioLimiteAlunos(escola) is IActionResult limiteAlunos) return limiteAlunos;
 
-            // 3. Descobre a turma: por Id, por nome (criando se preciso) ou a primeira da escola
+            // 3. Descobre a turma: por Id, por nome ou a primeira da escola (salas são criadas só pelo administrador)
             Turma? turma = null;
             if (Guid.TryParse(dto.TurmaId, out var turmaIdInformado) && turmaIdInformado != Guid.Empty)
             {
@@ -356,9 +369,12 @@ public class JogoController : ControllerBase
             }
             if (turma == null && !string.IsNullOrWhiteSpace(dto.NomeTurma))
             {
-                turma = ObterOuCriarTurma(escola, dto.NomeTurma);
+                turma = AcharTurma(escola, dto.NomeTurma);
+                if (turma == null) return SalaInexistente(dto.NomeTurma);
             }
-            turma ??= escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault() ?? ObterOuCriarTurma(escola, "1º Ano A");
+            turma ??= escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault();
+            if (turma == null)
+                return Conflict(new { codigo = "sala_inexistente", erro = "A escola ainda não tem salas. As salas são cadastradas pela administração no painel da escola." });
 
             var novoAluno = new Aluno
             {
@@ -405,7 +421,8 @@ public class JogoController : ControllerBase
 
             var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
             if (aluno == null && BloqueioLimiteAlunos(escola) is IActionResult limite) return limite;
-            var turmaDestino = ObterOuCriarTurma(escola, dto.NomeTurma);
+            var turmaDestino = AcharTurma(escola, dto.NomeTurma);
+            if (turmaDestino == null) return SalaInexistente(dto.NomeTurma);
 
             if (aluno == null)
             {
@@ -551,6 +568,184 @@ public class JogoController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(new { mensagem = "Progresso salvo com sucesso!" });
+    }
+
+    // =====================================================================
+    // PERSONAGENS DE PERFIL (únicos por escola)
+    // =====================================================================
+
+    /// <summary>Troféus para resgatar um personagem (troféu = as 30 fases de um nível concluídas).</summary>
+    public const int TrofeusParaPersonagem = 2;
+
+    private static HashSet<string>? _catalogoPersonagens;
+
+    /// <summary>Códigos válidos, lidos de wwwroot/imagens/personagens/catalogo.json.</summary>
+    private static HashSet<string> CatalogoPersonagens()
+    {
+        if (_catalogoPersonagens != null) return _catalogoPersonagens;
+        var codigos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string caminho = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "imagens", "personagens", "catalogo.json");
+        if (System.IO.File.Exists(caminho))
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(caminho));
+            foreach (var p in doc.RootElement.GetProperty("personagens").EnumerateArray())
+                codigos.Add(p.GetProperty("codigo").GetString() ?? "");
+        }
+        _catalogoPersonagens = codigos;
+        return codigos;
+    }
+
+    /// <summary>Níveis completos (30 fases concluídas) = troféus, como no jogo.</summary>
+    private static int ContarTrofeus(IEnumerable<ProgressoFase> progressos) =>
+        progressos.Where(p => p.Concluida && p.NumeroFase >= 1 && p.NumeroFase <= 30)
+                  .GroupBy(p => new { p.Materia, p.Nivel })
+                  .Count(g => g.Select(p => p.NumeroFase).Distinct().Count() == 30);
+
+    /// <summary>Personagens já resgatados na escola (o jogo mostra a foto de cada aluno e bloqueia os que têm dono).</summary>
+    [HttpGet("personagens")]
+    public async Task<IActionResult> ListarPersonagens([FromQuery] string? token, [FromHeader(Name = "X-Escola-Token")] string? tokenHeader)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        var escola = await _db.Escolas.Include(e => e.Municipio).FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
+        if (escola == null) return NotFound("Escola não encontrada.");
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
+
+        var lista = await _db.PersonagensResgatados
+            .Where(p => p.EscolaId == escola.Id)
+            .Select(p => new { aluno = p.Aluno!.NomeJogo, codigo = p.Codigo })
+            .ToListAsync();
+        return Ok(new { trofeusNecessarios = TrofeusParaPersonagem, personagens = lista });
+    }
+
+    /// <summary>
+    /// Resgata um personagem para o aluno. Regras: o aluno precisa de 2 troféus (níveis completos),
+    /// ainda não ter personagem, e ninguém da escola pode ter escolhido o mesmo.
+    /// </summary>
+    [HttpPost("personagens/resgatar")]
+    public async Task<IActionResult> ResgatarPersonagem(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] ResgatarPersonagemDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        string codigo = (dto.Codigo ?? "").Trim().ToLowerInvariant();
+        if (!CatalogoPersonagens().Contains(codigo))
+            return BadRequest(new { codigo = "personagem_invalido", erro = "Personagem não encontrado no catálogo." });
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return NotFound("Escola não encontrada.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
+
+            var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+            if (aluno == null) return NotFound(new { codigo = "aluno_nao_encontrado", erro = "Aluno não encontrado nesta escola." });
+
+            if (await _db.PersonagensResgatados.AnyAsync(p => p.AlunoId == aluno.Id))
+                return Conflict(new { codigo = "ja_tem_personagem", erro = "Você já resgatou o seu personagem." });
+
+            var progressos = await _db.ProgressoFases.Where(p => p.AlunoId == aluno.Id).ToListAsync();
+            int trofeus = ContarTrofeus(progressos);
+            if (trofeus < TrofeusParaPersonagem)
+                return Conflict(new { codigo = "trofeus_insuficientes", trofeus, erro = $"Você precisa de {TrofeusParaPersonagem} troféus (tem {trofeus})." });
+
+            if (await _db.PersonagensResgatados.AnyAsync(p => p.EscolaId == escola.Id && p.Codigo == codigo))
+                return Conflict(new { codigo = "personagem_ocupado", erro = "Esse personagem já tem dono na sua escola. Escolha outro!" });
+
+            _db.PersonagensResgatados.Add(new PersonagemResgatado { EscolaId = escola.Id, AlunoId = aluno.Id, Codigo = codigo });
+            try
+            {
+                await _db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Outro computador resgatou o mesmo personagem no mesmo instante (índice único)
+                return Conflict(new { codigo = "personagem_ocupado", erro = "Esse personagem acabou de ser escolhido por outra criança. Escolha outro!" });
+            }
+            _logger.LogInformation("Personagem {Codigo} resgatado por {Aluno} na escola {Escola}", codigo, aluno.NomeJogo, escola.Nome);
+            return Ok(new { codigo, trofeus });
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
+    }
+
+    // =====================================================================
+    // HABILIDADES DA BNCC
+    // =====================================================================
+
+    /// <summary>Soma acertos e erros por habilidade de uma fase jogada.</summary>
+    [HttpPost("habilidades")]
+    public async Task<IActionResult> RegistrarHabilidades(
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] string? token,
+        [FromBody] HabilidadesLoteDto dto)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+
+        await _travaCadastro.WaitAsync();
+        try
+        {
+            var escola = await BuscarEscolaComAlunos(tokenEfetivo);
+            if (escola == null) return Unauthorized("Token da escola inválido.");
+            if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
+            var aluno = AcharAlunoPorNome(escola, dto.NomeAluno);
+            if (aluno == null) return NotFound(new { erro = "Aluno não encontrado nesta escola." });
+
+            var existentes = await _db.AlunoHabilidades.Where(h => h.AlunoId == aluno.Id).ToListAsync();
+            int salvos = 0;
+            foreach (var item in dto.Itens ?? new List<HabilidadeItemDto>())
+            {
+                if (!HabilidadesBncc.Todas.ContainsKey(item.Codigo ?? "")) continue;
+                int acertos = Math.Clamp(item.Acertos, 0, 50), erros = Math.Clamp(item.Erros, 0, 50);
+                if (acertos + erros == 0) continue;
+                string cod = HabilidadesBncc.Todas[item.Codigo!].Codigo;
+                var linha = existentes.FirstOrDefault(h => h.Codigo == cod);
+                if (linha == null)
+                {
+                    linha = new AlunoHabilidade { AlunoId = aluno.Id, Codigo = cod };
+                    _db.AlunoHabilidades.Add(linha);
+                    existentes.Add(linha);
+                }
+                linha.Acertos += acertos;
+                linha.Erros += erros;
+                linha.UltimaAtualizacao = DateTime.UtcNow;
+                salvos++;
+            }
+            await _db.SaveChangesAsync();
+            return Ok(new { salvos });
+        }
+        finally
+        {
+            _travaCadastro.Release();
+        }
+    }
+
+    /// <summary>Relatório por habilidade de uma sala (turmaId) ou da escola inteira (sem turmaId).</summary>
+    [HttpGet("habilidades-sala")]
+    public async Task<IActionResult> RelatorioHabilidadesSala(
+        [FromQuery] string? token,
+        [FromHeader(Name = "X-Escola-Token")] string? tokenHeader,
+        [FromQuery] Guid? turmaId)
+    {
+        var tokenEfetivo = NormalizarToken(tokenHeader, token);
+        if (tokenEfetivo == null) return BadRequest("Token obrigatório.");
+        var escola = await _db.Escolas.Include(e => e.Municipio).Include(e => e.Turmas).FirstOrDefaultAsync(e => e.TokenAcesso.ToUpper() == tokenEfetivo);
+        if (escola == null) return NotFound("Escola não encontrada.");
+        if (BloqueioLicenca(escola) is IActionResult bloqueio) return bloqueio;
+
+        var turmaIds = escola.Turmas.Where(t => turmaId == null || t.Id == turmaId).Select(t => t.Id).ToList();
+        var dados = await _db.AlunoHabilidades
+            .Where(h => turmaIds.Contains(h.Aluno!.TurmaId) && h.Aluno.Ativo)
+            .Select(h => new { h.Codigo, h.Acertos, h.Erros, Aluno = h.Aluno!.NomeJogo })
+            .ToListAsync();
+
+        return Ok(new { habilidades = RelatorioHabilidades.Montar(dados.Select(d => (d.Codigo, d.Aluno, d.Acertos, d.Erros))) });
     }
 
     /// <summary>
@@ -804,8 +999,9 @@ public class JogoController : ControllerBase
             {
                 if (BloqueioLimiteAlunos(escola) is IActionResult limite) return limite;
                 var turma = !string.IsNullOrWhiteSpace(dto.NomeTurma)
-                    ? ObterOuCriarTurma(escola, dto.NomeTurma)
-                    : escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault() ?? ObterOuCriarTurma(escola, "1º Ano A");
+                    ? AcharTurma(escola, dto.NomeTurma)
+                    : escola.Turmas.OrderBy(t => t.Nome).FirstOrDefault();
+                if (turma == null) return SalaInexistente(dto.NomeTurma);
                 aluno = new Aluno
                 {
                     Id = Guid.NewGuid(),

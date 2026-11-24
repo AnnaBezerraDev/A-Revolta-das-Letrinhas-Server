@@ -39,6 +39,13 @@ public class Escola
     /// <summary>Máximo de computadores usando o jogo ao mesmo tempo.</summary>
     public int LimiteMaquinas { get; set; } = 100;
 
+    /// <summary>
+    /// Senha da coordenação (login "coordenacao" no jogo, acesso a todas as salas), só como hash
+    /// (ver Seguranca/SenhaHash). null = ainda não definida: o acesso geral fica desligado.
+    /// </summary>
+    [MaxLength(200)]
+    public string? SenhaCoordenacaoHash { get; set; }
+
     public List<Turma> Turmas { get; set; } = new();
 
     public List<Maquina> Maquinas { get; set; } = new();

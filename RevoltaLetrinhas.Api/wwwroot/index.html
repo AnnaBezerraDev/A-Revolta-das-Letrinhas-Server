@@ -613,7 +613,7 @@
     }
 
     function algumModalAberto() {
-      return ['modalProfessor', 'modalLicenca', 'modalMaquinas', 'modalContrato', 'modalLogin']
+      return ['modalProfessor', 'modalLicenca', 'modalMaquinas', 'modalContrato', 'modalLogin', 'modalBncc']
         .some(id => document.getElementById(id) && document.getElementById(id).style.display === 'flex');
     }
 
@@ -653,7 +653,26 @@
       document.getElementById('licMaquinas').value = licencaAtual.limiteMaquinas ?? 100;
       document.getElementById('licAtiva').checked = licencaAtual.ativa !== false;
       document.getElementById('licAviso').innerText = '';
+      document.getElementById('licSenhaCoord').value = '';
+      document.getElementById('licSenhaCoordStatus').innerHTML = licencaAtual.temSenhaCoordenacao
+        ? '<span style="color:#15803D;">✔ Definida.</span> Digite outra para trocar.'
+        : '<span style="color:#B91C1C;">✖ Ainda não definida:</span> o login "coordenacao" não funciona no jogo.';
       abrirModal('modalLicenca');
+    }
+
+    async function salvarSenhaCoordenacao() {
+      const campo = document.getElementById('licSenhaCoord');
+      const senha = campo.value.trim();
+      if (senha.length < 8) return alert('A senha da coordenação precisa ter pelo menos 8 caracteres.');
+      try {
+        await enviarJson(`/api/admin/escolas/${escolaAtualId}/senha-coordenacao`, 'PUT', { senha });
+        campo.value = '';
+        if (licencaAtual) licencaAtual.temSenhaCoordenacao = true;
+        document.getElementById('licSenhaCoordStatus').innerHTML = '<span style="color:#15803D;">✔ Definida.</span> Digite outra para trocar.';
+        alert('Senha da coordenação salva!\n\nNo jogo, use o usuário "coordenacao" com esta senha na Área do Professor.');
+      } catch (err) {
+        alert('Não foi possível salvar a senha da coordenação: ' + err.message);
+      }
     }
 
     async function salvarLicenca() {
@@ -929,6 +948,7 @@
             <span>💻 Computadores em uso: <strong>${L.maquinasEmUso} / ${L.limiteMaquinas}</strong></span>
             <button class="btn btn-sm" onclick="abrirModalLicenca()">⚙️ Licença da escola</button>
             <button class="btn btn-sm" onclick="abrirModalMaquinas()">💻 Computadores</button>
+            <button class="btn btn-sm" onclick="abrirModalBncc()">📊 Habilidades BNCC</button>
           </div>
         `;
 
@@ -1079,6 +1099,76 @@
         setTimeout(() => URL.revokeObjectURL(link.href), 10000);
       } catch (err) {
         if (err.status !== 401) alert("Erro ao baixar os dados da escola: " + err.message);
+      }
+    }
+
+    /* RELATÓRIO POR HABILIDADE DA BNCC */
+    let relatorioBncc = null;
+
+    async function abrirModalBncc() {
+      if (!escolaAtualId) return;
+      const escola = dadosGerais.escolas.find(e => e.id === escolaAtualId);
+      document.getElementById('bnccNomeEscola').innerText = escola ? escola.nome : '';
+      document.getElementById('bnccConteudo').innerHTML = '<p style="color:#64748B;">Carregando...</p>';
+      abrirModal('modalBncc');
+      try {
+        relatorioBncc = await api(`/api/admin/escola/${escolaAtualId}/habilidades`);
+        const sel = document.getElementById('bnccSala');
+        sel.innerHTML = '<option value="">Escola toda</option>' +
+          (relatorioBncc.salas || []).map((s, i) => `<option value="${i}">${esc(s.turma)}</option>`).join('');
+        mostrarBncc();
+      } catch (err) {
+        document.getElementById('bnccConteudo').innerHTML = `<p style="color:#B91C1C;">Não foi possível carregar: ${esc(err.message)}</p>`;
+      }
+    }
+
+    function mostrarBncc() {
+      if (!relatorioBncc) return;
+      const i = document.getElementById('bnccSala').value;
+      const linhas = i === '' ? relatorioBncc.habilidades : relatorioBncc.salas[Number(i)].habilidades;
+      if (!linhas || !linhas.length) {
+        document.getElementById('bnccConteudo').innerHTML =
+          '<p style="color:#64748B;">Ainda não há respostas registradas. Os dados aparecem conforme os alunos jogam (versão 1.0.8 ou mais nova).</p>';
+        return;
+      }
+      const cor = t => t >= 80 ? '#16A34A' : t >= 60 ? '#CA8A04' : '#DC2626';
+      document.getElementById('bnccConteudo').innerHTML = `
+        <table class="table" style="width:100%; font-size:13px;">
+          <thead><tr><th>Componente</th><th>Código</th><th>Habilidade</th><th style="width:170px;">Acerto</th><th>Respostas</th><th>Precisam de atenção</th></tr></thead>
+          <tbody>${linhas.map(l => `
+            <tr>
+              <td>${esc(l.componente)}</td>
+              <td><b>${esc(l.codigo)}</b><br><small style="color:#64748B;">${esc(l.ano)} ano</small></td>
+              <td><b>${esc(l.resumo)}</b><br><small style="color:#64748B;">${esc(l.descricao)}</small></td>
+              <td>
+                <div style="background:#E2E8F0; border-radius:6px; height:12px; overflow:hidden;"><div style="width:${l.taxa}%; height:12px; background:${cor(l.taxa)};"></div></div>
+                <b style="color:${cor(l.taxa)};">${l.taxa}%</b> <small>(${l.acertos} de ${l.respostas})</small>
+              </td>
+              <td>${l.respostas}<br><small style="color:#64748B;">${l.alunosAvaliados} aluno(s)</small></td>
+              <td>${l.alunosAtencao.length ? esc(l.alunosAtencao.join(', ')) : '<span style="color:#16A34A;">—</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <p style="font-size:12px; color:#64748B;">"Precisam de atenção": pelo menos 4 respostas na habilidade e menos de 60% de acerto.
+        Texto das habilidades: BNCC oficial (MEC). Homófonos e expressões com parênteses não têm habilidade própria até o 5º ano: foram associados à habilidade mais próxima (EF35LP13/EF05LP01 e EF04MA05).</p>`;
+    }
+
+    async function baixarBnccCsv() {
+      if (!escolaAtualId) return;
+      try {
+        const res = await requisicao(`/api/admin/escola/${escolaAtualId}/habilidades-csv`);
+        if (!res.ok) throw await erroDaResposta(res);
+        const blob = await res.blob();
+        const nome = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = nome ? nome[1] : 'Habilidades_BNCC.csv';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+      } catch (err) {
+        if (err.status !== 401) alert("Erro ao baixar o relatório: " + err.message);
       }
     }
 
@@ -1306,6 +1396,28 @@
         <button class="btn" style="background:#E2E8F0; color:#334155; padding:8px 16px; border-radius:6px;" onclick="fecharModal('modalLicenca')">Cancelar</button>
         <button class="btn btn-success" style="padding:8px 16px; border-radius:6px;" onclick="salvarLicenca()">Salvar licença</button>
       </div>
+      <hr style="border:none; border-top:1px solid #E2E8F0; margin:18px 0 14px;">
+      <label style="display:block; font-size:13px; font-weight:600; margin-bottom:4px; color:#334155;">🔑 Senha da coordenação (no jogo: usuário <code>coordenacao</code>, vê todas as salas):</label>
+      <p id="licSenhaCoordStatus" style="font-size:12px; color:#64748B; margin:0 0 6px;"></p>
+      <div style="display:flex; gap:8px;">
+        <input type="password" id="licSenhaCoord" autocomplete="new-password" style="flex:1; padding:8px 10px; border:1px solid #CBD5E1; border-radius:6px; box-sizing:border-box;" placeholder="Mínimo de 8 caracteres">
+        <button class="btn" style="padding:8px 14px; border-radius:6px;" onclick="salvarSenhaCoordenacao()">Salvar senha</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL HABILIDADES DA BNCC -->
+  <div id="modalBncc" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:12px; width:1100px; max-width:96%; max-height:90vh; overflow:auto; padding:24px; box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+        <h3 style="margin:0; color:#1E293B;">📊 Habilidades da BNCC — <span id="bnccNomeEscola" style="color:#4F46E5;"></span></h3>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <select id="bnccSala" onchange="mostrarBncc()" style="padding:6px 10px; border:1px solid #CBD5E1; border-radius:6px;"></select>
+          <button class="btn btn-sm" onclick="baixarBnccCsv()">⬇️ Baixar CSV</button>
+          <button class="btn btn-sm" style="background:#E2E8F0; color:#334155;" onclick="fecharModal('modalBncc')">Fechar</button>
+        </div>
+      </div>
+      <div id="bnccConteudo"></div>
     </div>
   </div>
 

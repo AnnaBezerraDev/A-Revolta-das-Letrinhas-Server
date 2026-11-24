@@ -56,6 +56,12 @@ Para testar o servidor local exigindo senha, no PowerShell antes do `dotnet run`
 Não há rota de envio de patch (a antiga `upload-patch` foi removida na 1.0.5). Coloque o novo
 `Assembly-CSharp.dll` em `wwwroot/patch/`, aumente a versão em `JogoController.ObterVersaoJogo` e faça commit.
 
+## Senha da coordenação (dentro do jogo)
+
+É outra senha, uma por escola, para a Área do Professor do jogo com acesso a todas as salas
+(usuário `coordenacao`). Defina em **Licença da escola → 🔑 Senha da coordenação** (mínimo 8 caracteres).
+Ela fica no banco só como hash (`Escolas.SenhaCoordenacaoHash`). Não existe mais o acesso fixo "professor / 1234".
+
 ## Código
 
 - `RevoltaLetrinhas.Api/Seguranca/AcessoAdmin.cs` — leitura da senha, regras acima e o filtro `[ExigirSenhaAdmin]`.

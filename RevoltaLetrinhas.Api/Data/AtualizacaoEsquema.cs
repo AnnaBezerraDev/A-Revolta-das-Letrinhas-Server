@@ -22,6 +22,13 @@ public static class AtualizacaoEsquema
 
         // v1.0.4 — tabela de máquinas (o SQL é gerado pelo próprio EF para o banco em uso)
         CriarTabelaSeNaoExistir(db, logger, "Maquinas");
+
+        // v1.0.8 — senha da coordenação da escola (substitui o acesso fixo "professor / 1234")
+        AdicionarColuna(db, postgres, logger, "Escolas", "SenhaCoordenacaoHash", "character varying(200) NULL", "TEXT NULL");
+
+        // v1.0.8 — personagens de perfil únicos por escola e acertos/erros por habilidade da BNCC
+        CriarTabelaSeNaoExistir(db, logger, "PersonagensResgatados");
+        CriarTabelaSeNaoExistir(db, logger, "AlunoHabilidades");
     }
 
     private static void AdicionarColuna(AppDbContext db, bool postgres, ILogger logger,

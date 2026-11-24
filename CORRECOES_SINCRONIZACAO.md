@@ -144,6 +144,107 @@ e conte nos dedos".
 **Testes (build isolado + servidor local):** aluno de "1º Ano A" e de "3ºANO A", Português e Matemática nos 3 níveis;
 acerto no Difícil do 1º ano conclui a fase direto; as 120 palavras geram desafio válido.
 
+## Versão 1.0.8 — acesso do professor seguro e progresso que acompanha o aluno
+
+**Fim do "professor / 1234"**
+- Antes, o jogo aceitava "professor / 1234" em cada computador, e o servidor também, em qualquer escola.
+  Com isso um aluno via o gabarito, usava "Auto-completar", liberava todas as fases e via os dados da escola inteira.
+- Agora existe a **senha da coordenação** de cada escola: definida no painel de administração
+  (Licença da escola → 🔑 Senha da coordenação), mínimo de 8 caracteres, guardada só como hash PBKDF2.
+  No jogo: usuário `coordenacao` (o nome antigo `professor` também é aceito) com essa senha. Sem senha definida,
+  o acesso da coordenação fica desligado. Professores de sala continuam com o login da sala.
+- Senha errada demora meio segundo para responder e aparece no log do servidor.
+- **Sem internet:** só entra quem já fez login com internet naquele computador (o jogo guarda um hash da senha,
+  não a senha). Se a senha for trocada, a antiga deixa de valer assim que for testada com internet.
+- **A sessão termina sozinha:** 5 minutos depois de fechar todas as telas do professor, ou na hora em que outro
+  aluno é escolhido. O gabarito e as fases liberadas não ficam abertos para o aluno seguinte.
+- **"Auto-completar" honesto:** a fase resolvida pelo professor é liberada naquele computador, mas não entra no
+  desempenho do aluno no servidor (antes contava como acerto perfeito).
+
+**Progresso que acompanha o aluno**
+- Ao escolher o nome (e a cada sincronização), o jogo baixa do servidor as fases que o aluno já concluiu em qualquer
+  computador da escola e marca no PC atual, com as vidas, os níveis liberados e os troféus. Só acrescenta: nada que
+  foi feito no PC é desmarcado.
+
+**Testes (servidor local + build isolado):** `professor/1234` recusado; coordenação sem senha → desligada; senha curta
+ou óbvia recusada; banco guarda só o hash; senha certa/errada; professor de sala; troca de senha pelo painel (a antiga
+para de valer); aluno com 35 fases feitas "em outro PC" → 30 fases de Português Fácil, Médio liberado e troféu no PC novo;
+sessão encerrada por tempo e por troca de aluno; auto-completar não chegou ao servidor e a fase jogada chegou;
+sem internet, só o login já usado no PC entra.
+
+**Ao publicar:** depois do deploy do servidor, defina a senha da coordenação de cada escola no painel
+(sem ela, o login `coordenacao` não funciona; os professores de sala não são afetados).
+
+### 1.0.8 — novidades para professores e alunos (tudo em código: chega pela atualização automática)
+
+- **Resgate das Letrinhas (recompensa):** cada fase vale 1 a 3 estrelas (pelas vidas que sobraram); as estrelas
+  resgatam as 26 letrinhas que fugiram ("A de ABELHA"...) para o **Álbum das Letrinhas** (botão no Lobby).
+  Aviso "+N estrelas" ao concluir a fase e tela especial a cada letrinha resgatada. As estrelas saem do progresso
+  (que vai ao servidor), então o álbum acompanha o aluno; repetir fase não dá estrela a mais; fase resolvida pelo
+  professor não dá estrelas. (`ResgateLetrinhas.cs`)
+- **Várias perguntas por fase (contra o "chute"):** 3 perguntas (2 no 1º/2º ano e no Português Difícil, que já tem
+  2 etapas), com as mesmas 2 vidas para a fase inteira. O indicador mostra "PERGUNTA 2/3".
+- **Nível pela série:** 4º ano começa com o Médio liberado; 5º ano com Médio e Difícil.
+- **2º ano separado do 1º:** Português Fácil = vogal (palavras maiores), Médio = sílaba que falta (BO__ → LA),
+  Difícil = consoante que falta, com as trocas típicas (B/P, D/T, F/V, M/N, L/R). Matemática Fácil = somas e
+  subtrações até 10, Médio = dezenas sem "vai um", Difícil = dobro, metade e probleminhas. 1º ano continua igual.
+  Opções erradas nunca formam outra palavra conhecida nem palavrão (listas revisadas).
+- **5º ano:** metade das perguntas do Difícil viram **leitura** (30 textos curtos com pergunta) e **problemas**
+  (frações, porcentagem, dinheiro com centavos e duas etapas). (`ConteudoQuintoAno.cs`)
+- **Ouvir:** botão "OUVIR" na fase lê a pergunta com a voz em português do Windows ("Microsoft Maria");
+  no 1º e 2º ano a leitura é automática. Sem voz em português, o botão some. (`LeitorDeVoz.cs`)
+- **Dica depois do erro:** explica o caminho sem dar a resposta; aparece numa faixa na parte de baixo da tela,
+  longe dos personagens. (`ApoioGameplay.cs`)
+- **Pontuação:** a fonte de giz não tinha ponto, vírgula nem "?" (ex.: "R$ 3,00" saía "3 00"); agora usa uma fonte
+  reserva só para esses sinais.
+- Tela de explicação e gabarito do professor adaptados ao 1º/2º ano e à leitura do 5º ano.
+
+### 1.0.8 — desenhos, personagens de perfil e relatório por habilidade da BNCC
+
+- **Imagens:** Noto Emoji do Google, versão **v2.042** (a última com as imagens sob **licença Apache 2.0**; as versões
+  novas do repositório passaram para a OFL 1.1). Ficam no servidor em `wwwroot/imagens` com `LICENSE-noto-emoji.txt`
+  e `LEIA-ME.txt`; o jogo baixa cada imagem uma vez e guarda no PC (`ImagensRemotas.cs`) — chega pela atualização
+  automática, sem reinstalar. 117 desenhos de palavras + 518 personagens (~5 MB).
+- **Desenho da palavra:** **dentro** do balão da pergunta, à direita do texto (ex.: vela em "VEL_", coruja em "CORU__"),
+  e nas letrinhas do álbum. O texto do balão abre espaço para o desenho, então nada cobre os personagens da fase.
+- **Personagens de perfil (`TelaPersonagens.cs`):** galeria com 518 personagens (animais, heróis e magia, profissões
+  e esportes em 6 tons de pele, divertidos). Com **2 troféus** (2 níveis inteiros) o aluno resgata **um** personagem;
+  cada personagem tem **um único dono por escola** (índice único no banco); ao excluir o aluno, o personagem fica livre.
+  Vira a foto do aluno no crachá do Lobby e na lista "Quem vai jogar hoje?". Personagens de marcas (Disney, Pokémon...)
+  não podem ser usados sem licença. Servidor: `GET /api/jogo/personagens`, `POST /api/jogo/personagens/resgatar`
+  (confere troféus, dono e catálogo).
+- **Habilidades da BNCC:** cada pergunta tem o código da habilidade (texto oficial do MEC em `Servicos/HabilidadesBncc.cs`);
+  o jogo envia acertos/erros por habilidade ao fim de cada fase (concluída ou não) pela fila. Relatórios:
+  aba **Habilidades BNCC** na Área do Professor (sala ou escola), botão **📊 Habilidades BNCC** no painel web
+  (escola e por sala) e **CSV**. "Precisam de atenção": 4+ respostas e menos de 60% de acerto.
+  Sem habilidade própria até o 5º ano na BNCC: homófonos (→ EF35LP13/EF05LP01), expressões com parênteses
+  (→ EF04MA05) e advérbio (→ EF07LP09, antecipada) — aparece explicado no relatório.
+
+**Testes (servidor local + build isolado):** imagens e licença servidas; resgate sem troféus recusado; com 2 troféus
+resgatou; mesmo personagem para outra criança recusado; segundo personagem recusado; aluno excluído libera o personagem;
+tabelas novas criadas em banco existente; habilidades registradas (código inválido ignorado); relatório da escola/sala,
+CSV e aba do professor com os números certos; foto do personagem no crachá e na lista; álbum com desenhos; galeria
+com "É SEU!" e "Tem dono".
+
+**Testes (build isolado + servidor local, alunos de 1º a 5º ano):** desbloqueio por série; 2º ano (sílaba, consoante,
+contas); 5º ano (≈50% leitura/problemas, resposta com centavos aceita); 3 perguntas com "PERGUNTA 2/3"; dica após erro;
++2 estrelas com um erro; letrinhas A e B resgatadas e aviso "faltam 3 para a C"; auto-completar sem estrelas; estrelas
+voltando do servidor num PC "novo"; voz em português ativa e o processo de voz fechando com o jogo.
+
+### 1.0.8 — salas cadastradas só pela administração
+
+- **Servidor:** o jogo não cria mais salas. `POST /api/jogo/criar-turma` só devolve uma sala que já existe; sala nova
+  responde **409** com `codigo: "sala_inexistente"`. Cadastrar ou mudar aluno para uma sala que não existe também
+  responde 409 (antes a sala era criada sozinha). Salas novas: painel da escola (`POST /api/admin/turmas`).
+- **Jogo:** o botão "+ CRIAR SALA" saiu da janela de salas; fica só o filtro/escolha de sala existente, com o aviso
+  "As salas são cadastradas pela administração da escola, no painel.". Pedidos antigos de "criar sala" que estavam
+  na fila do PC são descartados; aluno recusado por sala inexistente mostra o motivo.
+
+**Testes (servidor local + build isolado):** sala inventada pelo jogo → 409 e não aparece no banco; sala existente → 200;
+aluno em sala inexistente → 409; mudar aluno para sala inexistente → 409; admin cria sala → 200; janela de salas sem
+"criar sala". Fotos das 6 telas (Português e Matemática, 3 níveis, com dica): desenho dentro do balão, dica embaixo,
+nenhum personagem coberto.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra
