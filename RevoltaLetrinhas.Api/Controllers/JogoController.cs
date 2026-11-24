@@ -123,13 +123,13 @@ public class JogoController : ControllerBase
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
             // (e o VersaoCodigoDoBuild do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.6",
-            versaoCodigo = 106,
+            versao = "1.0.7",
+            versaoCodigo = 107,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "A tela inicial agora mostra a versão do jogo no canto inferior esquerdo."
+            novidades = "Fases mais fáceis para o 1º e 2º ano: no Português, completar a vogal de palavras pequenas; na Matemática, somas com números de um algarismo."
         });
     }
 

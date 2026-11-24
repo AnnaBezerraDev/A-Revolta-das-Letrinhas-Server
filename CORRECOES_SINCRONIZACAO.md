@@ -122,6 +122,28 @@ jogo reabriu sozinho já sem aviso; arquivo defeituoso → mensagem de erro.
   automática; ao publicar uma versão nova, basta mudar ali (e em `JogoController.ObterVersaoJogo`).
 - Quem está na 1.0.5 recebe a 1.0.6 com o aviso de atualização.
 
+## Versão 1.0.7 — fases mais fáceis para o 1º e 2º ano
+
+**Como o jogo decide (`Assets/ConteudoAlfabetizacao.cs`)**
+- Ao abrir cada fase, o jogo lê o ano no nome da sala do aluno que está jogando ("1º Ano A", "2°ANO B",
+  "Ano 1", "2ºA", "Segundo ano"...). Ano 1 ou 2 → conteúdo de alfabetização. Ano 3 ou mais, ou sala sem
+  número/desconhecida → conteúdo original. Trocar o aluno de sala vale a partir da fase seguinte.
+- Só mudam as palavras e as continhas: telas, vidas, estrelas, progresso enviado ao servidor e troféus são os mesmos.
+
+**Português (1º e 2º ano):** uma vogal faltando em palavra pequena; as 3 cartas são vogais.
+Fácil = 3–4 letras (UVA, BOLA), Médio = 4–5 letras (LIVRO, ZEBRA), Difícil = 5–7 letras (PANELA, GIRAFA),
+sem a etapa de classe gramatical. As vogais erradas nunca formam outra palavra comum (ex.: em S_NO não aparece
+o O, que formaria SONO) nem palavrão.
+
+**Matemática (1º e 2º ano):** somas com números de 1 algarismo. Fácil = parcelas de 1 a 5, Médio = resultado até 10,
+Difícil = resultado acima de 10. Alternativas próximas da resposta e nunca negativas; explicação "comece pelo maior
+e conte nos dedos".
+
+**Gabarito do Modo Professor:** mostra a palavra, a vogal e "Conteúdo de 1º e 2º ano".
+
+**Testes (build isolado + servidor local):** aluno de "1º Ano A" e de "3ºANO A", Português e Matemática nos 3 níveis;
+acerto no Difícil do 1º ano conclui a fase direto; as 120 palavras geram desafio válido.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra
