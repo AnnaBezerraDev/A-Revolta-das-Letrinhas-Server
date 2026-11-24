@@ -115,6 +115,13 @@ que aceitava sem senha um arquivo que todos os computadores das escolas baixam e
 seguinte com o patch pendente → *Reiniciar agora* → jogo fechou, arquivo trocado (hash igual ao do servidor),
 jogo reabriu sozinho já sem aviso; arquivo defeituoso → mensagem de erro.
 
+## Versão 1.0.6 — versão na tela inicial
+
+- O Lobby mostra **"Versão 1.0.6"** pequeno no canto inferior esquerdo (`GerenciadorPerfis.CriarTextoVersao`).
+- O número vem de `ServicoNuvem.VersaoCodigoDoBuild` / `VersaoNomeDoBuild`, o mesmo usado pela atualização
+  automática; ao publicar uma versão nova, basta mudar ali (e em `JogoController.ObterVersaoJogo`).
+- Quem está na 1.0.5 recebe a 1.0.6 com o aviso de atualização.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra

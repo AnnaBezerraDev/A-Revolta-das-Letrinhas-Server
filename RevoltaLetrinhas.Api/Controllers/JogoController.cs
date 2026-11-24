@@ -122,14 +122,14 @@ public class JogoController : ControllerBase
         return Ok(new
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
-            // (e o versaoLocalCodigo do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.5",
-            versaoCodigo = 105,
+            // (e o VersaoCodigoDoBuild do ServicoNuvem.cs no build correspondente).
+            versao = "1.0.6",
+            versaoCodigo = 106,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Aviso de atualização: o jogo mostra quando há uma versão nova, o andamento do download e permite reiniciar na hora para instalar."
+            novidades = "A tela inicial agora mostra a versão do jogo no canto inferior esquerdo."
         });
     }
 
