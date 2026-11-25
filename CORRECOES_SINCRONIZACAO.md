@@ -245,6 +245,23 @@ aluno em sala inexistente → 409; mudar aluno para sala inexistente → 409; ad
 "criar sala". Fotos das 6 telas (Português e Matemática, 3 níveis, com dica): desenho dentro do balão, dica embaixo,
 nenhum personagem coberto.
 
+## Versão 1.0.9 — token da escola ao abrir o jogo
+
+- **Toda vez que o jogo abre**, a tela "Digite o token da escola para começar" aparece antes da tela inicial
+  (`TelaTokenEscola.cs`). O jogo fica pausado e sem som até o token ser aceito. Não há mais escola padrão:
+  o token gravado no `config_escola.json` de instalações antigas (ex.: o da Olinto) é ignorado e apagado do arquivo,
+  e o build novo vem sem token.
+- **Token conferido no servidor** (`/api/jogo/conectar`): token inexistente é recusado; escola com licença bloqueada
+  entra e a tela de licença mostra o motivo. **Sem internet**, só entra o token da última escola confirmada naquele
+  computador (com os dados salvos).
+- Licença, lista de alunos e envios só começam depois do token; a atualização automática continua sendo verificada
+  logo ao abrir.
+- O token não aparece mais no lobby (exemplo genérico "ESC-NOMEDAESCOLA" no campo de troca de escola).
+
+**Testes (build isolado + servidor local):** abertura sem token e jogo pausado; vazio e token errado recusados;
+token certo libera a tela inicial e a licença; arquivo de configuração sem token; sem internet o token da última escola
+entra e outro é recusado; escola desativada mostra "Acesso da escola desativado" com o jogo pausado.
+
 ## Para publicar
 
 1. **Servidor**: commit + push do `teste2_Servidor` para o GitHub (o Render faz o deploy). Depois abra

@@ -119,13 +119,13 @@ public class JogoController : ControllerBase
         {
             // Ao publicar um novo Assembly-CSharp.dll em wwwroot/patch, aumente versaoCodigo
             // (e o VersaoCodigoDoBuild do ServicoNuvem.cs no build correspondente).
-            versao = "1.0.8",
-            versaoCodigo = 108,
+            versao = "1.0.9",
+            versaoCodigo = 109,
             dataPublicacao = ultimaModificacao.ToString("yyyy-MM-ddTHH:mm:ssZ"),
             temPatch = temPatch,
             tamanhoBytes = tamanho,
             urlDownloadPatch = "/api/jogo/download-patch",
-            novidades = "Resgate das Letrinhas e personagens de perfil; desenhos nas palavras; botão Ouvir e dicas; conteúdo do 2º e do 5º ano; relatório por habilidade da BNCC; acesso da coordenação com senha própria."
+            novidades = "O jogo pede o token da escola toda vez que abre, antes da tela inicial. Peça o token à administração da escola."
         });
     }
 
